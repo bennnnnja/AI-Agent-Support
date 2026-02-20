@@ -2,7 +2,7 @@
 __pycache__/
 *.pyc
 .venv/
-.myvenv/
+myvenv/
 .ruff_cache/
 *.egg-info/
 dist/
