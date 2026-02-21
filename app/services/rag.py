@@ -30,7 +30,7 @@ def search_knowledge(query: str) -> list[str]:
     }
 
     try:
-        with httpx.Client(timeout=60.0) as client:
+        with httpx.Client(timeout=120.0) as client:
             r = client.post(
                 f"{settings.rag_api_url}/query",
                 json=body,
