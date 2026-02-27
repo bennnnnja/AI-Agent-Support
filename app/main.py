@@ -1,7 +1,52 @@
 import json
+import logging
 from app.config import settings
 from app.services.redis_consumer import get_redis_client, ensure_group, read_events
 from app.graph import build_graph
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+
+def _parse_event_payload(event: dict) -> dict:
+    """Parse and validate event payload from Redis."""
+    payload = event.get("payload", "{}")
+
+    # If payload is already a dict, return it
+    if isinstance(payload, dict):
+        return payload
+
+    # Try to parse as JSON string
+    if isinstance(payload, str):
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse payload JSON: {e}")
+            logger.debug(f"Raw payload: {payload[:300]}")
+            return {}
+
+    logger.warning(f"Unexpected payload type: {type(payload)}")
+    return {}
+
+
+def _validate_event(event: dict) -> bool:
+    """Validate that event has required fields."""
+    issue_key = event.get("issue_key") or _parse_event_payload(event).get("issue_key")
+    event_type = event.get("event_type")
+
+    if not issue_key:
+        logger.warning("Event missing issue_key, skipping")
+        return False
+
+    if not event_type:
+        logger.warning("Event missing event_type, skipping")
+        return False
+
+    return True
 
 
 def main():
@@ -16,24 +61,36 @@ def main():
     while True:
         events = read_events(client)
         for event in events:
-            print(f"\n--- New event: {event.get('issue_key')} ---")
+            # Validate event has required fields
+            if not _validate_event(event):
+                continue
 
-            payload = event.get("payload", "{}")
-            if isinstance(payload, str):
-                try:
-                    payload = json.loads(payload)
-                except json.JSONDecodeError:
-                    payload = {}
+            payload = _parse_event_payload(event)
+            event_type = event.get("event_type")
+            issue_key = payload.get("issue_key") or event.get("issue_key", "")
 
-            is_first_message = event.get("event_type") == "issue_created"
-            if is_first_message:
-                user_message = payload.get("issue_summary", "")
+            logger.info(f"Processing {event_type} for {issue_key}")
+
+            # Determine message based on event type
+            if event_type == "issue_created":
+                # Try to get summary from payload, will be loaded in ingest_event if missing
+                user_message = payload.get("summary") or ""
+                is_first_message = True
+            elif event_type in ("comment_created", "issue_updated"):
+                # Prefer comment body, fallback to summary
+                user_message = payload.get("body") or payload.get("summary") or ""
+                is_first_message = False
             else:
-                user_message = payload.get("comment_body") or payload.get("issue_summary", "")
+                logger.warning(f"Unknown event type: {event_type}, using summary as message")
+                user_message = payload.get("summary") or ""
+                is_first_message = False
 
+            # DON'T skip if user_message is empty - ingest_event will load it from Jira
+            if not user_message:
+                logger.debug(f"No message in payload for {issue_key}, will load from Jira in ingest_event")
 
             initial_state = {
-                "ticket_id": payload.get("issue_key") or event.get("issue_key", ""),
+                "ticket_id": issue_key,
                 "user_message": user_message,
                 "is_first_message": is_first_message,
                 "conversation_history": [],
@@ -44,11 +101,15 @@ def main():
                 "resolution": None,
             }
 
-            result = graph.invoke(initial_state)
+            try:
+                logger.info(f"Invoking graph for {issue_key}")
+                result = graph.invoke(initial_state)
 
-            print(f"Category: {result.get('category')}")
-            print(f"Response: {result.get('response')}")
-            print("---")
+                logger.info(f"Result for {issue_key}:")
+                logger.info(f"  Category: {result.get('category')}")
+                logger.info(f"  Response: {result.get('response', 'None')[:100]}")
+            except Exception as e:
+                logger.error(f"Graph execution failed for {issue_key}: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

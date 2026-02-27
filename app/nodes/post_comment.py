@@ -1,19 +1,36 @@
+import logging
 from app.state import AgentState
 from app.services.jira_mcp import add_comment
 
+logger = logging.getLogger(__name__)
+
 
 def post_comment_node(state: AgentState) -> AgentState:
+    """
+    Post generated response as a comment to Jira issue.
+    """
     ticket_id = state.get("ticket_id", "")
     response = state.get("response", "")
 
-    if not ticket_id or not response:
-        print(f"[Jira] Skipping comment: ticket_id={ticket_id!r}, response_present={bool(response)}")
+    # Validation
+    if not ticket_id:
+        logger.warning("No ticket_id in state, cannot post comment")
         return state
 
-    try:
-        add_comment(ticket_id, response)
-        print(f"[Jira] Comment posted to {ticket_id}")
-    except Exception as e:
-        print(f"[Jira] Failed to post comment to {ticket_id}: {e}")
+    if not response:
+        logger.warning(f"No response generated for {ticket_id}, skipping comment")
+        return state
 
-    return state
+    # Trim response if too long (Jira comment limit is typically 32k chars)
+    if len(response) > 30000:
+        logger.warning(f"Response too long ({len(response)} chars), trimming for {ticket_id}")
+        response = response[:29900] + "\n\n[... сообщение обрезано - слишком много символов]"
+
+    try:
+        logger.info(f"Posting comment to {ticket_id}")
+        add_comment(ticket_id, response)
+        logger.info(f"Successfully posted comment to {ticket_id}")
+        return {**state, "resolution": "comment_posted"}
+    except Exception as e:
+        logger.error(f"Failed to post comment to {ticket_id}: {e}", exc_info=True)
+        return {**state, "resolution": f"error_posting_comment: {str(e)}"}

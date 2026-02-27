@@ -15,10 +15,10 @@ class Settings(BaseSettings):
     # RAG API
     rag_api_url: str = "http://10.10.10.5:9621"
     rag_username: str = ""
-    rag_password: str = ""
+    rag_api_key: str = ""
 
     # Jira
-    jira_url: str = "http://10.60.18.220:30280"
+    jira_url: str = "http://10.10.30.2:8080"
     jira_token: str = ""
 
 

@@ -6,7 +6,7 @@ def _get_token() -> str:
     with httpx.Client(timeout=10.0) as client:
         r = client.post(
             f"{settings.rag_api_url}/login",
-            data={"username": settings.rag_username, "password": settings.rag_password},
+            data={"username": settings.rag_username, "password": settings.rag_api_key},
         )
         r.raise_for_status()
         return r.json()["access_token"]

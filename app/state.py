@@ -7,6 +7,13 @@ class AgentState(TypedDict, total=False):
     user_message: str
     is_first_message: bool
 
+    # Информация о задаче из Jira
+    issue_summary: str
+    issue_description: str
+    issue_status: str
+    issue_assignee: str
+    issue_priority: str
+
     # История из Jira
     conversation_history: list[dict]
 
