@@ -4,6 +4,7 @@ from app.nodes.ingest import ingest_event
 from app.nodes.classify import classify_request
 from app.nodes.search_knowledge import search_knowledge_node
 from app.nodes.generate import generate_response
+from app.nodes.post_comment import post_comment_node
 
 
 
@@ -26,6 +27,7 @@ def build_graph():
     graph.add_node("classify_request", classify_request)
     graph.add_node("search_knowledge", search_knowledge_node)
     graph.add_node("generate_response", generate_response)
+    graph.add_node("post_comment", post_comment_node)
 
     # Точка входа
     graph.set_entry_point("ingest_event")
@@ -40,6 +42,7 @@ def build_graph():
     })
 
     graph.add_edge("search_knowledge", "generate_response")
-    graph.add_edge("generate_response", END)
+    graph.add_edge("generate_response", "post_comment")
+    graph.add_edge("post_comment", END)
 
     return graph.compile()

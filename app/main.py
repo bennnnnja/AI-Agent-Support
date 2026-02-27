@@ -25,10 +25,17 @@ def main():
                 except json.JSONDecodeError:
                     payload = {}
 
+            is_first_message = event.get("event_type") == "issue_created"
+            if is_first_message:
+                user_message = payload.get("issue_summary", "")
+            else:
+                user_message = payload.get("comment_body") or payload.get("issue_summary", "")
+
+
             initial_state = {
                 "ticket_id": payload.get("issue_key") or event.get("issue_key", ""),
-                "user_message": payload.get("issue_summary", "") or payload.get("comment_body", ""),
-                "is_first_message": event.get("event_type") == "issue_created",
+                "user_message": user_message,
+                "is_first_message": is_first_message,
                 "conversation_history": [],
                 "category": None,
                 "rag_results": [],
