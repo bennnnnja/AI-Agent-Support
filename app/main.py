@@ -118,7 +118,11 @@ def main():
 
                 logger.info(f"Result for {issue_key}:")
                 logger.info(f"  Category: {result.get('category')}")
-                logger.info(f"  Response: {result.get('response', 'None')[:100]}")
+                response = result.get('response', '')
+                if response:
+                    logger.info(f"  Response: {response[:100]}")
+                else:
+                    logger.warning(f"  Response: (empty or None)")
             except Exception as e:
                 logger.error(f"Graph execution failed for {issue_key}: {e}", exc_info=True)
 

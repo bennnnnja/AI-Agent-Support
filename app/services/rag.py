@@ -30,12 +30,15 @@ def search_knowledge(query: str) -> list[str]:
 
     body = {
         "query": query,
-        "mode": "mix",
+        "mode": "hybrid",  # Changed from "mix" to "hybrid" for better relevance
         "only_need_context": False,
-        "top_k": 5,
+        "top_k": 10,  # Increased from 5 to 10 to get more results
         "include_references": True,
         "stream": False,
     }
+
+    logger.warning(f"[RAG] Sending query: {query[:100]}")
+    logger.debug(f"[RAG] Request body: mode={body['mode']}, top_k={body['top_k']}")
 
     try:
         with httpx.Client(timeout=30.0) as client:
@@ -47,7 +50,7 @@ def search_knowledge(query: str) -> list[str]:
             r.raise_for_status()
             data = r.json()
     except httpx.TimeoutException:
-        logger.error(f"RAG request timed out (30s) for query: {query[:80]}")
+        logger.error(f"RAG request timed out (120s) for query: {query[:80]}")
         return []
     except Exception as e:
         logger.error(f"RAG request failed: {e}")
