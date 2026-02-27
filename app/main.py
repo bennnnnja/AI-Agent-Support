@@ -34,7 +34,7 @@ def _parse_event_payload(event: dict) -> dict:
 
 
 def _validate_event(event: dict) -> bool:
-    """Validate that event has required fields."""
+    """Validate that event has required fields and should be processed."""
     issue_key = event.get("issue_key") or _parse_event_payload(event).get("issue_key")
     event_type = event.get("event_type")
 
@@ -44,6 +44,14 @@ def _validate_event(event: dict) -> bool:
 
     if not event_type:
         logger.warning("Event missing event_type, skipping")
+        return False
+
+    # IMPORTANT: Ignore events from the bot itself to prevent infinite loops
+    # Check if this is a comment event and if it's from the bot
+    if event_type in ("comment_added", "comment_created"):
+        # TEMPORARY: Block ALL comment events while we debug the filter
+        # TODO: Remove this block once comment filter is working properly
+        logger.warning(f"[FILTER] BLOCKING comment_* event entirely (temporary debug measure)")
         return False
 
     return True
@@ -61,6 +69,9 @@ def main():
     while True:
         events = read_events(client)
         for event in events:
+            # DEBUG: Log raw event structure
+            logger.debug(f"Raw event from Redis: {event}")
+
             # Validate event has required fields
             if not _validate_event(event):
                 continue

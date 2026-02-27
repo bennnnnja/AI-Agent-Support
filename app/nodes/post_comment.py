@@ -28,7 +28,18 @@ def post_comment_node(state: AgentState) -> AgentState:
 
     try:
         logger.info(f"Posting comment to {ticket_id}")
-        add_comment(ticket_id, response)
+        result = add_comment(ticket_id, response)
+
+        # Check if MCP returned an error
+        result_lower = (result or "").lower()
+        if result and any(err_indicator in result_lower for err_indicator in ["error", "validation", "failed", "exception"]):
+            logger.error(f"MCP returned error for {ticket_id}: {result[:300]}")
+            return {**state, "resolution": f"error_posting_comment: {result[:200]}"}
+
+        if not result:
+            logger.warning(f"MCP returned empty response for {ticket_id}")
+            return {**state, "resolution": "warning_empty_mcp_response"}
+
         logger.info(f"Successfully posted comment to {ticket_id}")
         return {**state, "resolution": "comment_posted"}
     except Exception as e:

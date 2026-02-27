@@ -9,10 +9,12 @@ GENERATE_PROMPT = """Ты — специалист технической под
 
 ВАЖНЫЕ ПРАВИЛА:
 - Используй ТОЛЬКО информацию из раздела "Документация" ниже
-- Если в документации нет ответа на вопрос, так и скажи: "В документации нет информации по данному вопросу"
+- Если в документации нет ответа на вопрос, так и скажи: "В документации нет информации по данному вопросу. Заявка будет передана специалисту."
 - НЕ придумывай инструкции от себя
+- НЕ проси уточняющие детали - используй имеющуюся информацию
 - Давай пошаговые инструкции из документации
 - Будь вежливым и кратким
+- Отвечай на русском языке
 
 ИНФОРМАЦИЯ О ЗАДАЧЕ:
 Статус: {issue_status}
@@ -61,11 +63,19 @@ def generate_response(state: AgentState) -> AgentState:
     """Generate response based on RAG results and conversation context."""
     llm = get_llm()
 
+    # Get RAG results
+    rag_results = state.get("rag_results", [])
+    logger.warning(f"[GENERATE] RAG results count: {len(rag_results)}")
+    if rag_results:
+        for i, result in enumerate(rag_results):
+            logger.warning(f"[GENERATE] RAG result {i}: {result[:200]}")
+
     # Format history
     history_text = _format_conversation_history(state.get("conversation_history", []))
 
     # Format RAG
-    rag_text = _format_rag_results(state.get("rag_results", []))
+    rag_text = _format_rag_results(rag_results)
+    logger.warning(f"[GENERATE] Formatted RAG text length: {len(rag_text)}, preview: {rag_text[:200]}")
 
     # Get issue context
     issue_status = state.get("issue_status", "Unknown")

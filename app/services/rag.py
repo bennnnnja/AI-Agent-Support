@@ -1,5 +1,9 @@
+import logging
+
 import httpx
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _get_token() -> str:
@@ -13,7 +17,11 @@ def _get_token() -> str:
 
 
 def search_knowledge(query: str) -> list[str]:
-    token = _get_token()
+    try:
+        token = _get_token()
+    except Exception as e:
+        logger.error(f"RAG login failed: {e}")
+        return []
 
     headers = {
         "Content-Type": "application/json",
@@ -30,7 +38,7 @@ def search_knowledge(query: str) -> list[str]:
     }
 
     try:
-        with httpx.Client(timeout=120.0) as client:
+        with httpx.Client(timeout=30.0) as client:
             r = client.post(
                 f"{settings.rag_api_url}/query",
                 json=body,
@@ -38,11 +46,16 @@ def search_knowledge(query: str) -> list[str]:
             )
             r.raise_for_status()
             data = r.json()
+    except httpx.TimeoutException:
+        logger.error(f"RAG request timed out (30s) for query: {query[:80]}")
+        return []
     except Exception as e:
-        print(f"RAG request failed: {e}")
+        logger.error(f"RAG request failed: {e}")
         return []
 
     response_text = data.get("response", "")
     if response_text:
+        logger.info(f"RAG returned {len(response_text)} chars")
         return [response_text]
+    logger.warning("RAG returned empty response")
     return []

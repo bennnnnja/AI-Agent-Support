@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 from app.config import settings
-from app.services.jira_mcp import _server_params, _call, _parse_jira_response
+from app.services.jira_mcp import _server_params, _call, _list_tools, _parse_jira_response
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -30,11 +30,21 @@ async def test_mcp_connection():
     logger.info(f"  Args: {server_params.args}")
     logger.info(f"  Env vars: {list(server_params.env.keys()) if server_params.env else 'None'}")
     
-    logger.info("\nAttempting to call MCP get_issue tool...")
-    
+    # First, discover available tools
+    logger.info("\nDiscovering available MCP tools...")
     try:
-        # Try to call get_issue
-        result = await _call("get_issue", {
+        tools = await _list_tools()
+        logger.info(f"  Available tools ({len(tools)}):")
+        for t in sorted(tools):
+            logger.info(f"    - {t}")
+    except Exception as e:
+        logger.error(f"  Failed to list tools: {e}")
+
+    logger.info("\nAttempting to call MCP jira_get_issue tool...")
+
+    try:
+        # Try to call jira_get_issue
+        result = await _call("jira_get_issue", {
             "issue_key": "TEST-1",
             "comment_limit": 5
         })
@@ -64,8 +74,8 @@ async def test_mcp_connection():
         error_str = str(e)
         if "Unknown tool" in error_str:
             logger.error("\n⚠️ DIAGNOSTIC:")
-            logger.error("   MCP server is running but doesn't recognize 'get_issue' tool")
-            logger.error("   This might mean mcp-atlassian package isn't installed or is incompatible")
+            logger.error("   MCP server is running but doesn't recognize the tool name")
+            logger.error("   Ensure mcp-atlassian is installed and tool names use 'jira_' prefix")
             logger.error("\n   Try:")
             logger.error("   1. Stop current MCP server")
             logger.error("   2. Run: uvx --force-reinstall mcp-atlassian")
