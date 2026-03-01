@@ -12,20 +12,16 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434/"
     ollama_model: str = "qwen3:8b"
 
-    # RAG API
+    # RAG API (Knowledge Base)
     rag_api_url: str = "http://localhost:9621"
-    rag_username: str = ""
     rag_api_key: str = ""
-
-    # Jira
+    
+    # Jira MCP
     jira_url: str = "http://localhost:8080"
     jira_token: str = ""
 
-    # Bot identity (for filtering bot's own comments)
+    # Agent
     bot_username: str = ""
-
-
-    model_config = {"env_file": ".env", "extra": "ignore"}
 
 
 settings = Settings()
