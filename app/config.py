@@ -1,7 +1,9 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
     # Redis
     redis_url: str = "redis://localhost:6379"
     redis_stream: str = "jira.events"
@@ -12,8 +14,9 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434/"
     ollama_model: str = "qwen3:8b"
 
-    # RAG API (Knowledge Base)
+    # RAG API (Knowledge Base) — login via POST /login (grant_type=password), then Bearer token for /query
     rag_api_url: str = "http://localhost:9621"
+    rag_username: str = ""
     rag_api_key: str = ""
     
     # Jira MCP

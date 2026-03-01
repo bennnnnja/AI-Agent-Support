@@ -60,17 +60,18 @@ class TestBotCommentFiltering:
         assert _validate_event(payload, "comment_created") is True
 
     @patch("app.main.settings")
-    def test_comment_without_author_passes(self, mock_settings):
-        """Comment with no author field should not be filtered."""
+    def test_comment_without_author_filtered_when_bot_set(self, mock_settings):
+        """Comment with no author is filtered when bot_username is set (prevents loop)."""
         mock_settings.bot_username = "Agent"
         payload = {"issue_key": "TEST-1"}
-        assert _validate_event(payload, "comment_created") is True
+        assert _validate_event(payload, "comment_created") is False
 
     @patch("app.main.settings")
-    def test_comment_with_empty_author_passes(self, mock_settings):
+    def test_comment_with_empty_author_filtered_when_bot_set(self, mock_settings):
+        """Comment with empty author is filtered when bot_username is set."""
         mock_settings.bot_username = "Agent"
         payload = {"issue_key": "TEST-1", "author": ""}
-        assert _validate_event(payload, "comment_created") is True
+        assert _validate_event(payload, "comment_created") is False
 
     @patch("app.main.settings")
     def test_bot_username_empty_allows_all_comments(self, mock_settings):

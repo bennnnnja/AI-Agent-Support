@@ -52,10 +52,15 @@ def _validate_event(payload: dict, event_type: str) -> bool:
 
     # Filter out bot's own comment events to prevent infinite loops
     if event_type in ("comment_added", "comment_created"):
-        comment_author = payload.get("author", "")
-        if settings.bot_username and comment_author == settings.bot_username:
-            logger.info(f"[FILTER] Ignoring comment from bot ({comment_author}) on {issue_key}")
-            return False
+        comment_author = (payload.get("author") or "").strip()
+        if settings.bot_username:
+            if comment_author == settings.bot_username:
+                logger.info(f"[FILTER] Ignoring comment from bot ({comment_author}) on {issue_key}")
+                return False
+            # If author is missing, skip to avoid processing our own comment (publisher may not send author)
+            if not comment_author:
+                logger.info(f"[FILTER] Ignoring comment_added with no author on {issue_key} (prevents loop)")
+                return False
 
     return True
 
@@ -87,11 +92,11 @@ def main():
 
             logger.info(f"Processing {event_type} for {issue_key}")
 
-            # Determine message based on event type
+            # Determine message based on event type (body = new comment text for dialogue)
             if event_type == "issue_created":
                 user_message = payload.get("summary") or ""
                 is_first_message = True
-            elif event_type in ("comment_created", "issue_updated"):
+            elif event_type in ("comment_created", "comment_added", "issue_updated"):
                 user_message = payload.get("body") or payload.get("summary") or ""
                 is_first_message = False
             else:

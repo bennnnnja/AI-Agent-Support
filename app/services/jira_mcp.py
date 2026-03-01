@@ -158,7 +158,7 @@ def get_issue(issue_key: str, comment_limit: int = 10) -> JiraIssue:
 
 def add_comment(issue_key: str, comment: str) -> str:
     """Add comment to Jira issue. Returns MCP response text."""
-    result = asyncio.run(_call("jira_add_comment", {"issue_key": issue_key, "comment": comment}))
+    result = asyncio.run(_call("jira_add_comment", {"issue_key": issue_key, "body": comment}))
     if result:
         logger.info(f"[Jira] add_comment response: {result[:200]}")
     else:
