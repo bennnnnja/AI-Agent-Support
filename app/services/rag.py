@@ -41,7 +41,7 @@ def search_knowledge(query: str) -> list[str]:
     logger.debug(f"[RAG] Request body: mode={body['mode']}, top_k={body['top_k']}")
 
     try:
-        with httpx.Client(timeout=30.0) as client:
+        with httpx.Client(timeout=5.0) as client:
             r = client.post(
                 f"{settings.rag_api_url}/query",
                 json=body,
