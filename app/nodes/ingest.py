@@ -1,6 +1,7 @@
 import logging
 from app.state import AgentState
 from app.services.jira_mcp import get_issue
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ def ingest_event(state: AgentState) -> AgentState:
         # Add comments as conversation
         for comment in issue.get("comments", []):
             conversation_history.append({
-                "role": "assistant" if "bot" in comment.get("author", "").lower() else "user",
+                "role": "assistant" if (settings.bot_username and comment.get("author", "") == settings.bot_username) else "user",
                 "author": comment.get("author", "Unknown"),
                 "body": comment.get("body", ""),
                 "created": comment.get("created", "")

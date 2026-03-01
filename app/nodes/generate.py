@@ -65,17 +65,17 @@ def generate_response(state: AgentState) -> AgentState:
 
     # Get RAG results
     rag_results = state.get("rag_results", [])
-    logger.warning(f"[GENERATE] RAG results count: {len(rag_results)}")
+    logger.debug(f"[GENERATE] RAG results count: {len(rag_results)}")
     if rag_results:
         for i, result in enumerate(rag_results):
-            logger.warning(f"[GENERATE] RAG result {i}: {result[:200]}")
+            logger.debug(f"[GENERATE] RAG result {i}: {result[:200]}")
 
     # Format history
     history_text = _format_conversation_history(state.get("conversation_history", []))
 
     # Format RAG
     rag_text = _format_rag_results(rag_results)
-    logger.warning(f"[GENERATE] Formatted RAG text length: {len(rag_text)}, preview: {rag_text[:200]}")
+    logger.debug(f"[GENERATE] Formatted RAG text length: {len(rag_text)}, preview: {rag_text[:200]}")
 
     # Get issue context
     issue_status = state.get("issue_status", "Unknown")

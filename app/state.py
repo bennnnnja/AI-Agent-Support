@@ -26,6 +26,5 @@ class AgentState(TypedDict, total=False):
     # Генерация
     response: str | None
 
-    # Цикл обратной связи
-    attempt_count: int
+    # Результат
     resolution: str | None

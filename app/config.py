@@ -9,17 +9,20 @@ class Settings(BaseSettings):
     redis_consumer: str = "agent-1"
 
     # Ollama
-    ollama_url: str = "http://10.60.18.220:11434/"
+    ollama_url: str = "http://localhost:11434/"
     ollama_model: str = "qwen3:8b"
 
     # RAG API
-    rag_api_url: str = "http://10.10.10.5:9621"
+    rag_api_url: str = "http://localhost:9621"
     rag_username: str = ""
     rag_api_key: str = ""
 
     # Jira
-    jira_url: str = "http://10.10.30.2:8080"
+    jira_url: str = "http://localhost:8080"
     jira_token: str = ""
+
+    # Bot identity (for filtering bot's own comments)
+    bot_username: str = ""
 
 
     model_config = {"env_file": ".env", "extra": "ignore"}

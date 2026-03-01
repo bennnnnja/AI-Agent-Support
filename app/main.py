@@ -58,13 +58,13 @@ def _validate_event(event: dict) -> bool:
 
 
 def main():
-    print(f"Starting agent | stream={settings.redis_stream}")
+    logger.info(f"Starting agent | stream={settings.redis_stream}")
 
     client = get_redis_client()
     ensure_group(client)
     graph = build_graph()
 
-    print("Listening for events...")
+    logger.info("Listening for events...")
 
     while True:
         events = read_events(client)
@@ -108,7 +108,6 @@ def main():
                 "category": None,
                 "rag_results": [],
                 "response": None,
-                "attempt_count": 0,
                 "resolution": None,
             }
 
