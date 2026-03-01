@@ -37,12 +37,20 @@ def _server_params() -> StdioServerParameters:
     return StdioServerParameters(command="uvx", args=["mcp-atlassian"], env=env)
 
 
+class MCPError(Exception):
+    """Raised when MCP tool call returns an error."""
+    pass
+
+
 async def _call(tool: str, args: dict) -> str:
     async with stdio_client(_server_params()) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(tool, args)
-            return result.content[0].text if result.content else ""
+            text = result.content[0].text if result.content else ""
+            if result.isError:
+                raise MCPError(text)
+            return text
 
 
 async def _list_tools() -> list[str]:

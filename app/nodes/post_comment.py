@@ -1,6 +1,6 @@
 import logging
 from app.state import AgentState
-from app.services.jira_mcp import add_comment
+from app.services.jira_mcp import add_comment, MCPError
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +30,15 @@ def post_comment_node(state: AgentState) -> AgentState:
         logger.info(f"Posting comment to {ticket_id}")
         result = add_comment(ticket_id, response)
 
-        # Check if MCP returned an error
-        result_lower = (result or "").lower()
-        if result and any(err_indicator in result_lower for err_indicator in ["error", "validation", "failed", "exception"]):
-            logger.error(f"MCP returned error for {ticket_id}: {result[:300]}")
-            return {**state, "resolution": f"error_posting_comment: {result[:200]}"}
-
         if not result:
             logger.warning(f"MCP returned empty response for {ticket_id}")
             return {**state, "resolution": "warning_empty_mcp_response"}
 
         logger.info(f"Successfully posted comment to {ticket_id}")
         return {**state, "resolution": "comment_posted"}
+    except MCPError as e:
+        logger.error(f"MCP error posting comment to {ticket_id}: {e}")
+        return {**state, "resolution": f"error_posting_comment: {e}"}
     except Exception as e:
         logger.error(f"Failed to post comment to {ticket_id}: {e}", exc_info=True)
-        return {**state, "resolution": f"error_posting_comment: {str(e)}"}
+        return {**state, "resolution": f"error_posting_comment: {e}"}

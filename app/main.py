@@ -1,7 +1,7 @@
 import json
 import logging
 from app.config import settings
-from app.services.redis_consumer import get_redis_client, ensure_group, read_events
+from app.services.redis_consumer import get_redis_client, ensure_group, read_events, ack_event
 from app.graph import build_graph
 
 # Configure logging
@@ -33,10 +33,14 @@ def _parse_event_payload(event: dict) -> dict:
     return {}
 
 
-def _validate_event(event: dict) -> bool:
-    """Validate that event has required fields and should be processed."""
-    issue_key = event.get("issue_key") or _parse_event_payload(event).get("issue_key")
-    event_type = event.get("event_type")
+def _validate_event(payload: dict, event_type: str) -> bool:
+    """Validate that event has required fields and should be processed.
+
+    Args:
+        payload: Already-parsed event payload.
+        event_type: Event type string from Redis fields.
+    """
+    issue_key = payload.get("issue_key")
 
     if not issue_key:
         logger.warning("Event missing issue_key, skipping")
@@ -46,13 +50,12 @@ def _validate_event(event: dict) -> bool:
         logger.warning("Event missing event_type, skipping")
         return False
 
-    # IMPORTANT: Ignore events from the bot itself to prevent infinite loops
-    # Check if this is a comment event and if it's from the bot
+    # Filter out bot's own comment events to prevent infinite loops
     if event_type in ("comment_added", "comment_created"):
-        # TEMPORARY: Block ALL comment events while we debug the filter
-        # TODO: Remove this block once comment filter is working properly
-        logger.warning(f"[FILTER] BLOCKING comment_* event entirely (temporary debug measure)")
-        return False
+        comment_author = payload.get("author", "")
+        if settings.bot_username and comment_author == settings.bot_username:
+            logger.info(f"[FILTER] Ignoring comment from bot ({comment_author}) on {issue_key}")
+            return False
 
     return True
 
@@ -68,27 +71,27 @@ def main():
 
     while True:
         events = read_events(client)
-        for event in events:
-            # DEBUG: Log raw event structure
-            logger.debug(f"Raw event from Redis: {event}")
+        for message_id, raw_event in events:
+            logger.debug(f"Raw event from Redis: {raw_event}")
 
-            # Validate event has required fields
-            if not _validate_event(event):
+            # Parse payload once
+            payload = _parse_event_payload(raw_event)
+            event_type = raw_event.get("event_type", "")
+            issue_key = payload.get("issue_key") or raw_event.get("issue_key", "")
+            payload["issue_key"] = issue_key  # ensure issue_key is in payload
+
+            # Validate event
+            if not _validate_event(payload, event_type):
+                ack_event(client, message_id)
                 continue
-
-            payload = _parse_event_payload(event)
-            event_type = event.get("event_type")
-            issue_key = payload.get("issue_key") or event.get("issue_key", "")
 
             logger.info(f"Processing {event_type} for {issue_key}")
 
             # Determine message based on event type
             if event_type == "issue_created":
-                # Try to get summary from payload, will be loaded in ingest_event if missing
                 user_message = payload.get("summary") or ""
                 is_first_message = True
             elif event_type in ("comment_created", "issue_updated"):
-                # Prefer comment body, fallback to summary
                 user_message = payload.get("body") or payload.get("summary") or ""
                 is_first_message = False
             else:
@@ -96,7 +99,6 @@ def main():
                 user_message = payload.get("summary") or ""
                 is_first_message = False
 
-            # DON'T skip if user_message is empty - ingest_event will load it from Jira
             if not user_message:
                 logger.debug(f"No message in payload for {issue_key}, will load from Jira in ingest_event")
 
@@ -118,8 +120,10 @@ def main():
                 logger.info(f"Result for {issue_key}:")
                 logger.info(f"  Category: {result.get('category')}")
                 logger.info(f"  Response: {result.get('response', 'None')[:100]}")
+                ack_event(client, message_id)
             except Exception as e:
                 logger.error(f"Graph execution failed for {issue_key}: {e}", exc_info=True)
+                # Do NOT ack — event stays in pending list for reprocessing
 
 
 if __name__ == "__main__":
