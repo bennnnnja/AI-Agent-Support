@@ -19,7 +19,12 @@ def ensure_group(client: redis.Redis):
             raise
 
 
-def read_events(client: redis.Redis) -> list[dict]:
+def read_events(client: redis.Redis) -> list[tuple[str, dict]]:
+    """Read events from Redis Stream.
+
+    Returns list of (message_id, data) tuples.
+    Caller is responsible for calling ack_event() after successful processing.
+    """
     results = client.xreadgroup(
         groupname=settings.redis_group,
         consumername=settings.redis_consumer,
@@ -34,7 +39,11 @@ def read_events(client: redis.Redis) -> list[dict]:
     events = []
     for stream_name, messages in results:
         for message_id, data in messages:
-            events.append({"id": message_id, **data})
-            client.xack(settings.redis_stream, settings.redis_group, message_id)
+            events.append((message_id, data))
 
     return events
+
+
+def ack_event(client: redis.Redis, message_id: str):
+    """Acknowledge event after successful processing."""
+    client.xack(settings.redis_stream, settings.redis_group, message_id)
