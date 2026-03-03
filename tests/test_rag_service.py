@@ -27,6 +27,18 @@ class TestSearchKnowledge:
 
     @patch("app.services.rag.httpx.Client")
     @patch("app.services.rag.settings")
+    def test_no_context_response_filtered(self, mock_settings, mock_client_cls, mock_get_token):
+        """Technical 'no context' message from RAG should not be treated as a valid result."""
+        mock_settings.rag_api_url = "http://rag:9621"
+        mock_settings.rag_api_key = "sk-key"
+        mock_client_cls.return_value.__enter__.return_value.post.return_value = _mock_post_ok(
+            {"response": "No relevant context found for the query."}
+        )
+        results = search_knowledge("printer issue")
+        assert results == []
+
+    @patch("app.services.rag.httpx.Client")
+    @patch("app.services.rag.settings")
     def test_successful_search_results_list(self, mock_settings, mock_client_cls, mock_get_token):
         mock_settings.rag_api_url = "http://rag:9621"
         mock_settings.rag_api_key = "sk-key"

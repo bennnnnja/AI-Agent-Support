@@ -56,26 +56,45 @@ class TestFormatRagResults:
 
 class TestGenerateResponse:
     @patch("app.nodes.generate.get_llm")
-    def test_normal_generation(self, mock_get_llm, base_state, mock_llm_response):
-        mock_get_llm.return_value.invoke.return_value = mock_llm_response(
-            "Попробуйте перезагрузить принтер."
-        )
-        base_state["rag_results"] = ["Инструкция: перезагрузите принтер"]
-        base_state["category"] = "tech_support"
+    def test_rag_only_response_without_llm_call(self, mock_get_llm, base_state):
+        """If RAG returned results, response should be built directly from them and LLM must not be invoked."""
+        base_state["rag_results"] = ["Инструкция: перезагрузите принтер", "Дополнительный шаг"]
 
         result = generate_response(base_state)
-        assert result["response"] == "Попробуйте перезагрузить принтер."
+
+        # LLM не должен вызываться в RAG-only режиме
+        mock_get_llm.assert_not_called()
+        # Ответ — это форматированный текст из RAG
+        assert "Инструкция: перезагрузите принтер" in result["response"]
+        assert "Дополнительный шаг" in result["response"]
+
+    @patch("app.nodes.generate.get_llm")
+    def test_fallback_llm_used_when_no_rag(self, mock_get_llm, base_state, mock_llm_response):
+        """When RAG has no results, use fallback LLM with safe generic advice."""
+        mock_get_llm.return_value.invoke.return_value = mock_llm_response("Общие шаги диагностики.")
+        base_state["rag_results"] = []
+
+        result = generate_response(base_state)
+
+        assert result["response"] == "Общие шаги диагностики."
+        prompt = mock_get_llm.return_value.invoke.call_args[0][0]
+        # Проверяем, что в промпте есть контекст задачи и вопрос пользователя
+        assert base_state["user_message"] in prompt
+        assert "Статус:" in prompt
 
     @patch("app.nodes.generate.get_llm")
     def test_llm_exception_returns_fallback(self, mock_get_llm, base_state):
+        """If fallback LLM fails, return explicit error message."""
         mock_get_llm.return_value.invoke.side_effect = Exception("Ollama timeout")
+        base_state["rag_results"] = []
 
         result = generate_response(base_state)
         assert result["response"] == "Ошибка при генерации ответа"
 
     @patch("app.nodes.generate.get_llm")
-    def test_prompt_includes_issue_context(self, mock_get_llm, base_state, mock_llm_response):
+    def test_fallback_prompt_includes_issue_context(self, mock_get_llm, base_state, mock_llm_response):
         mock_get_llm.return_value.invoke.return_value = mock_llm_response("ok")
+        base_state["rag_results"] = []
         base_state["issue_status"] = "In Progress"
         base_state["issue_priority"] = "Critical"
         base_state["issue_assignee"] = "Admin"
@@ -87,39 +106,26 @@ class TestGenerateResponse:
         assert "Admin" in prompt
 
     @patch("app.nodes.generate.get_llm")
-    def test_prompt_includes_rag_results(self, mock_get_llm, base_state, mock_llm_response):
-        mock_get_llm.return_value.invoke.return_value = mock_llm_response("ok")
-        base_state["rag_results"] = ["Инструкция по принтеру HP"]
+    def test_response_without_content_attr_in_fallback(self, mock_get_llm, base_state):
+        """Handle LLM response that doesn't have .content attribute in fallback mode."""
 
-        generate_response(base_state)
-        prompt = mock_get_llm.return_value.invoke.call_args[0][0]
-        assert "Инструкция по принтеру HP" in prompt
-
-    @patch("app.nodes.generate.get_llm")
-    def test_no_rag_results_shows_placeholder(self, mock_get_llm, base_state, mock_llm_response):
-        mock_get_llm.return_value.invoke.return_value = mock_llm_response("ok")
-        base_state["rag_results"] = []
-
-        generate_response(base_state)
-        prompt = mock_get_llm.return_value.invoke.call_args[0][0]
-        assert "Документация не найдена" in prompt
-
-    @patch("app.nodes.generate.get_llm")
-    def test_response_without_content_attr(self, mock_get_llm, base_state):
-        """Handle LLM response that doesn't have .content attribute."""
         class FakeResponse:
             """LLM response without .content — str() fallback."""
+
             def __str__(self):
                 return "Fallback string response"
 
         mock_get_llm.return_value.invoke.return_value = FakeResponse()
+        base_state["rag_results"] = []
 
         result = generate_response(base_state)
         assert "Fallback string response" in result["response"]
 
     @patch("app.nodes.generate.get_llm")
     def test_preserves_state_fields(self, mock_get_llm, base_state, mock_llm_response):
+        """generate_response should not mutate existing state fields."""
         mock_get_llm.return_value.invoke.return_value = mock_llm_response("answer")
+        base_state["rag_results"] = []
         result = generate_response(base_state)
         assert result["ticket_id"] == "TEST-1"
         assert result["user_message"] == "Принтер не печатает"
