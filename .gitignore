@@ -6,3 +6,4 @@ myvenv/
 .ruff_cache/
 *.egg-info/
 dist/
+docs/
