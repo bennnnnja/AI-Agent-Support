@@ -50,17 +50,56 @@ def _validate_event(payload: dict, event_type: str) -> bool:
         logger.warning("Event missing event_type, skipping")
         return False
 
+    user_like_roles = {"user", "admin", "administrator", "telegram", "customer"}
+    user_like_sources = {"telegram", "web", "portal", "customer"}
+
     # Filter out bot's own comment events to prevent infinite loops
     if event_type in ("comment_added", "comment_created"):
         comment_author = (payload.get("author") or "").strip()
+        role = (payload.get("role") or "").strip().lower()
+        source = (payload.get("source") or "").strip().lower()
+
         if settings.bot_username:
             if comment_author == settings.bot_username:
                 logger.info(f"[FILTER] Ignoring comment from bot ({comment_author}) on {issue_key}")
                 return False
-            # If author is missing, skip to avoid processing our own comment (publisher may not send author)
-            if not comment_author:
-                logger.info(f"[FILTER] Ignoring comment_added with no author on {issue_key} (prevents loop)")
+
+        # If author is missing, require explicit user-like role/source.
+        # Otherwise we can accidentally reprocess bot comments and loop forever.
+        if not comment_author:
+            has_user_signal = (role in user_like_roles) or (source in user_like_sources)
+            if not has_user_signal:
+                logger.info(f"[FILTER] Ignoring comment with no author on {issue_key} (no user signal)")
                 return False
+            if role and role not in user_like_roles:
+                logger.info(f"[FILTER] Skipping comment role={role} on {issue_key}")
+                return False
+            if source and source not in user_like_sources:
+                logger.info(f"[FILTER] Skipping comment source={source} on {issue_key}")
+                return False
+
+        # Skip comments from support users (if configured)
+        if comment_author and comment_author in settings.support_username_set:
+            logger.info(f"[FILTER] Skipping comment from support {comment_author} on {issue_key}")
+            return False
+
+    # Minimal filter for issue_updated: if author exists and is not a user, skip (prevents reacting to support automation)
+    if event_type == "issue_updated":
+        author = (payload.get("author") or "").strip()
+        role = (payload.get("role") or "").strip().lower()
+        source = (payload.get("source") or "").strip().lower()
+        if author and settings.bot_username and author == settings.bot_username:
+            logger.info(f"[FILTER] Skipping issue_updated from bot ({author}) on {issue_key}")
+            return False
+        if author and author in settings.support_username_set:
+            logger.info(f"[FILTER] Skipping issue_updated from support {author} on {issue_key}")
+            return False
+        if role and role not in user_like_roles:
+            logger.info(f"[FILTER] Skipping issue_updated role={role} on {issue_key}")
+            return False
+        if source and source not in user_like_sources:
+            logger.info(f"[FILTER] Skipping issue_updated source={source} on {issue_key}")
+            return False
 
     return True
 
@@ -112,6 +151,13 @@ def main():
                 "user_message": user_message,
                 "is_first_message": is_first_message,
                 "conversation_history": [],
+                "attempt_count": 0,
+                # External classifier/microservice can force escalation via payload
+                "force_escalation": bool(
+                    payload.get("force_escalation")
+                    or payload.get("super_priority")
+                    or payload.get("needs_human")
+                ),
                 "category": None,
                 "rag_results": [],
                 "response": None,
@@ -124,7 +170,12 @@ def main():
 
                 logger.info(f"Result for {issue_key}:")
                 logger.info(f"  Category: {result.get('category')}")
-                logger.info(f"  Response: {result.get('response', 'None')[:100]}")
+                response_preview = result.get("response")
+                if isinstance(response_preview, str):
+                    response_preview = response_preview[:100]
+                else:
+                    response_preview = "None"
+                logger.info(f"  Response: {response_preview}")
                 ack_event(client, message_id)
             except Exception as e:
                 logger.error(f"Graph execution failed for {issue_key}: {e}", exc_info=True)

@@ -10,6 +10,7 @@ def base_state():
         "user_message": "Принтер не печатает",
         "is_first_message": True,
         "conversation_history": [],
+        "escalated": False,
         "category": None,
         "rag_results": [],
         "response": None,

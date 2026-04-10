@@ -8,6 +8,9 @@ class TestIngestEvent:
     @patch("app.nodes.ingest.settings")
     def test_normal_case_populates_state(self, mock_settings, mock_get_issue, base_state, sample_jira_issue):
         mock_settings.bot_username = "Agent"
+        # Business rule: escalation is tied to support role/usernames, not any assignee.
+        mock_settings.support_username_set = {"Support"}
+        mock_settings.escalation_status_set = set()
         mock_get_issue.return_value = sample_jira_issue
 
         from app.nodes.ingest import ingest_event
@@ -18,11 +21,14 @@ class TestIngestEvent:
         assert result["issue_status"] == "Open"
         assert result["issue_assignee"] == "Admin"
         assert result["issue_priority"] == "High"
+        assert result["escalated"] is False
 
     @patch("app.nodes.ingest.get_issue")
     @patch("app.nodes.ingest.settings")
     def test_bot_comment_gets_assistant_role(self, mock_settings, mock_get_issue, base_state, sample_jira_issue):
         mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
         mock_get_issue.return_value = sample_jira_issue
 
         from app.nodes.ingest import ingest_event
@@ -45,6 +51,8 @@ class TestIngestEvent:
     @patch("app.nodes.ingest.settings")
     def test_empty_user_message_filled_from_summary(self, mock_settings, mock_get_issue, sample_jira_issue):
         mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
         mock_get_issue.return_value = sample_jira_issue
 
         state = {
@@ -63,6 +71,8 @@ class TestIngestEvent:
     @patch("app.nodes.ingest.settings")
     def test_short_message_enriched_with_description(self, mock_settings, mock_get_issue):
         mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
         mock_get_issue.return_value = {
             "issue_key": "T-1",
             "summary": "Bug",
@@ -86,6 +96,8 @@ class TestIngestEvent:
     @patch("app.nodes.ingest.settings")
     def test_get_issue_returns_empty_dict(self, mock_settings, mock_get_issue, base_state):
         mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
         mock_get_issue.return_value = {}
 
         from app.nodes.ingest import ingest_event
@@ -97,6 +109,8 @@ class TestIngestEvent:
     @patch("app.nodes.ingest.settings")
     def test_get_issue_raises_exception(self, mock_settings, mock_get_issue, base_state):
         mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
         mock_get_issue.side_effect = Exception("MCP server down")
 
         from app.nodes.ingest import ingest_event
@@ -113,6 +127,8 @@ class TestIngestEvent:
     @patch("app.nodes.ingest.settings")
     def test_no_description_no_description_entry(self, mock_settings, mock_get_issue):
         mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
         mock_get_issue.return_value = {
             "issue_key": "T-1",
             "summary": "Short summary here",
@@ -135,6 +151,8 @@ class TestIngestEvent:
     @patch("app.nodes.ingest.settings")
     def test_bot_username_empty_all_comments_are_user(self, mock_settings, mock_get_issue, sample_jira_issue):
         mock_settings.bot_username = ""
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
         mock_get_issue.return_value = sample_jira_issue
 
         state = {"ticket_id": "TEST-42", "user_message": "test",
@@ -145,3 +163,26 @@ class TestIngestEvent:
         # With empty bot_username, all comments should be "user" role
         for entry in result["conversation_history"]:
             assert entry["role"] == "user"
+
+    @patch("app.nodes.ingest.get_issue")
+    @patch("app.nodes.ingest.settings")
+    def test_support_comment_gets_support_role(self, mock_settings, mock_get_issue):
+        mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = {"Admin"}
+        mock_settings.escalation_status_set = set()
+        mock_get_issue.return_value = {
+            "issue_key": "T-2",
+            "summary": "Help",
+            "description": "",
+            "status": "Open",
+            "assignee": "",
+            "priority": "",
+            "created": "",
+            "updated": "",
+            "comments": [{"author": "Admin", "body": "Берём в работу", "created": ""}],
+        }
+
+        from app.nodes.ingest import ingest_event
+        state = {"ticket_id": "T-2", "user_message": "Help", "is_first_message": True, "conversation_history": []}
+        result = ingest_event(state)
+        assert result["conversation_history"][0]["role"] == "support"

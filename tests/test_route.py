@@ -1,6 +1,6 @@
 """Tests for graph.route_by_category — routing logic."""
 import pytest
-from app.graph import route_by_category
+from app.graph import route_by_category, route_after_ingest
 
 
 class TestRouteByCategory:
@@ -24,3 +24,14 @@ class TestRouteByCategory:
 
     def test_unknown_category(self):
         assert route_by_category({"category": "billing"}) == "search_knowledge"
+
+
+class TestRouteAfterIngest:
+    def test_escalated_true_goes_to_end(self):
+        assert route_after_ingest({"escalated": True}) == "end"
+
+    def test_escalated_false_goes_to_classify(self):
+        assert route_after_ingest({"escalated": False}) == "classify"
+
+    def test_missing_escalated_goes_to_classify(self):
+        assert route_after_ingest({}) == "classify"

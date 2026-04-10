@@ -6,6 +6,72 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _normalize_assignee(value) -> str:
+    """Normalize assignee from Jira payload to a comparable username/display name."""
+    if not value:
+        return ""
+    if isinstance(value, dict):
+        # Jira payloads often provide assignee as an object
+        candidate = (
+            value.get("name")
+            or value.get("display_name")
+            or value.get("displayName")
+            or value.get("accountId")
+            or ""
+        )
+    else:
+        candidate = str(value)
+    assignee = candidate.strip()
+    if assignee.lower() in {"", "none", "null", "unassigned"}:
+        return ""
+    return assignee
+
+
+def _count_agent_attempts(conversation_history: list[dict]) -> int:
+    attempts = 0
+    for msg in conversation_history or []:
+        role = (msg.get("role") or "").strip().lower()
+        if role == "assistant":
+            attempts += 1
+    return attempts
+
+
+def _extract_latest_user_message(conversation_history: list[dict]) -> str:
+    for msg in reversed(conversation_history or []):
+        role = (msg.get("role") or "").strip().lower()
+        body = (msg.get("body") or "").strip()
+        if role == "user" and body:
+            return body
+    return ""
+
+
+def _is_escalated(
+    issue_status: str,
+    issue_assignee,
+    conversation_history: list[dict],
+    force_escalation: bool,
+    attempt_count: int,
+) -> tuple[bool, str]:
+    status_norm = (issue_status or "").strip().lower()
+    _ = _normalize_assignee(issue_assignee)
+
+    if force_escalation:
+        return True, "forced_by_microservice"
+
+    if status_norm and status_norm in settings.escalation_status_set:
+        return True, f"status={issue_status}"
+
+    for msg in conversation_history or []:
+        if (msg.get("role") or "").strip().lower() == "support":
+            author = msg.get("author") or ""
+            return True, f"support_comment={author}"
+
+    if attempt_count >= settings.max_self_help_attempts:
+        return True, f"attempt_limit={attempt_count}"
+
+    return False, ""
+
+
 def ingest_event(state: AgentState) -> AgentState:
     """
     Fetch issue details from Jira and populate state with issue info and comments history.
@@ -41,8 +107,15 @@ def ingest_event(state: AgentState) -> AgentState:
 
         # Add comments as conversation
         for comment in issue.get("comments", []):
+            author = comment.get("author", "") or ""
+            if settings.bot_username and author == settings.bot_username:
+                role = "assistant"
+            elif author in settings.support_username_set:
+                role = "support"
+            else:
+                role = "user"
             conversation_history.append({
-                "role": "assistant" if (settings.bot_username and comment.get("author", "") == settings.bot_username) else "user",
+                "role": role,
                 "author": comment.get("author", "Unknown"),
                 "body": comment.get("body", ""),
                 "created": comment.get("created", "")
@@ -61,10 +134,32 @@ def ingest_event(state: AgentState) -> AgentState:
             "conversation_history": conversation_history,
         }
 
-        # CRITICAL: If user_message is empty, use summary from loaded issue
-        if not state.get("user_message") and issue.get("summary"):
-            logger.info(f"[ingest] Filling user_message from issue summary (was empty)")
-            updated_state["user_message"] = issue.get("summary", "")
+        attempt_count = _count_agent_attempts(conversation_history)
+        updated_state["attempt_count"] = attempt_count
+
+        escalated, reason = _is_escalated(
+            updated_state.get("issue_status", ""),
+            updated_state.get("issue_assignee", ""),
+            conversation_history,
+            bool(updated_state.get("force_escalation")),
+            attempt_count,
+        )
+        updated_state["escalated"] = escalated
+        updated_state["escalation_reason"] = reason or None
+        if escalated:
+            updated_state["resolution"] = "skipped_escalated"
+            logger.info(f"[ESCALATED] {ticket_id} reason={reason}")
+
+        # If current event has no explicit message, prefer the latest user comment from history.
+        # This is important for comment events where webhook payload may omit "body".
+        if not state.get("user_message"):
+            latest_user_msg = _extract_latest_user_message(conversation_history)
+            if latest_user_msg:
+                logger.info("[ingest] Filling user_message from latest user comment (payload was empty)")
+                updated_state["user_message"] = latest_user_msg
+            elif issue.get("summary"):
+                logger.info("[ingest] Filling user_message from issue summary (was empty)")
+                updated_state["user_message"] = issue.get("summary", "")
         
         # Also use description if we have it and message is still short
         if len((updated_state.get("user_message") or "")) < 10 and issue.get("description"):

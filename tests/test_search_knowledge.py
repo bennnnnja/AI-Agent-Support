@@ -39,8 +39,7 @@ class TestSearchKnowledgeNode:
         mock_search.return_value = None
         state = {"user_message": "help", "issue_description": ""}
         result = search_knowledge_node(state)
-        # None results logged as warning
-        assert result["rag_results"] is None
+        assert result["rag_results"] == []
 
     @patch("app.nodes.search_knowledge.search_knowledge")
     def test_preserves_state(self, mock_search):
@@ -49,3 +48,15 @@ class TestSearchKnowledgeNode:
         result = search_knowledge_node(state)
         assert result["ticket_id"] == "X-1"
         assert result["category"] == "tech"
+
+    @patch("app.nodes.search_knowledge.search_knowledge")
+    def test_long_query_retries_with_short_query(self, mock_search):
+        mock_search.side_effect = [[], ["doc2"]]
+        state = {
+            "user_message": "Очень длинное сообщение.\n```code block```\nИ ещё детали которые не важны.",
+            "issue_description": "Описание проблемы с <tag>лишним</tag> HTML.",
+            "issue_summary": "Коротко: принтер",
+        }
+        result = search_knowledge_node(state)
+        assert result["rag_results"] == ["doc2"]
+        assert mock_search.call_count == 2

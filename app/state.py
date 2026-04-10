@@ -17,6 +17,12 @@ class AgentState(TypedDict, total=False):
     # История из Jira
     conversation_history: list[dict]
 
+    # Эскалация
+    escalated: bool
+    escalation_reason: str | None
+    attempt_count: int
+    force_escalation: bool
+
     # Классификация
     category: str | None
 

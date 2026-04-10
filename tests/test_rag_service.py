@@ -9,6 +9,7 @@ def _mock_post_ok(json_value):
     resp = MagicMock()
     resp.json.return_value = json_value
     resp.raise_for_status = MagicMock()
+    resp.status_code = 200
     return resp
 
 
@@ -19,6 +20,9 @@ class TestSearchKnowledge:
     def test_successful_search_single_response(self, mock_settings, mock_client_cls, mock_get_token):
         mock_settings.rag_api_url = "http://rag:9621"
         mock_settings.rag_api_key = "sk-key"
+        mock_settings.rag_response_type = "Multiple Paragraphs"
+        mock_settings.rag_top_k = 10
+        mock_settings.rag_mode_list = ["hybrid"]
         mock_client_cls.return_value.__enter__.return_value.post.return_value = _mock_post_ok(
             {"response": "Relevant documentation text"}
         )
@@ -31,6 +35,9 @@ class TestSearchKnowledge:
         """Technical 'no context' message from RAG should not be treated as a valid result."""
         mock_settings.rag_api_url = "http://rag:9621"
         mock_settings.rag_api_key = "sk-key"
+        mock_settings.rag_response_type = "Multiple Paragraphs"
+        mock_settings.rag_top_k = 10
+        mock_settings.rag_mode_list = ["hybrid"]
         mock_client_cls.return_value.__enter__.return_value.post.return_value = _mock_post_ok(
             {"response": "No relevant context found for the query."}
         )
@@ -42,6 +49,9 @@ class TestSearchKnowledge:
     def test_successful_search_results_list(self, mock_settings, mock_client_cls, mock_get_token):
         mock_settings.rag_api_url = "http://rag:9621"
         mock_settings.rag_api_key = "sk-key"
+        mock_settings.rag_response_type = "Multiple Paragraphs"
+        mock_settings.rag_top_k = 10
+        mock_settings.rag_mode_list = ["hybrid"]
         mock_client_cls.return_value.__enter__.return_value.post.return_value = _mock_post_ok(
             {"results": ["Snippet one", "Snippet two"]}
         )
@@ -53,6 +63,9 @@ class TestSearchKnowledge:
     def test_http_error_returns_empty(self, mock_settings, mock_client_cls, mock_get_token):
         mock_settings.rag_api_url = "http://rag:9621"
         mock_settings.rag_api_key = "sk-key"
+        mock_settings.rag_response_type = "Multiple Paragraphs"
+        mock_settings.rag_top_k = 10
+        mock_settings.rag_mode_list = ["hybrid"]
         mock_client_cls.return_value.__enter__.return_value.post.side_effect = httpx.HTTPStatusError(
             "404", request=MagicMock(), response=MagicMock(status_code=404)
         )
@@ -64,6 +77,9 @@ class TestSearchKnowledge:
     def test_timeout_returns_empty(self, mock_settings, mock_client_cls, mock_get_token):
         mock_settings.rag_api_url = "http://rag:9621"
         mock_settings.rag_api_key = "sk-key"
+        mock_settings.rag_response_type = "Multiple Paragraphs"
+        mock_settings.rag_top_k = 10
+        mock_settings.rag_mode_list = ["hybrid"]
         mock_client_cls.return_value.__enter__.return_value.post.side_effect = httpx.TimeoutException("timeout")
         results = search_knowledge("test")
         assert results == []
@@ -73,6 +89,9 @@ class TestSearchKnowledge:
     def test_empty_response(self, mock_settings, mock_client_cls, mock_get_token):
         mock_settings.rag_api_url = "http://rag:9621"
         mock_settings.rag_api_key = "sk-key"
+        mock_settings.rag_response_type = "Multiple Paragraphs"
+        mock_settings.rag_top_k = 10
+        mock_settings.rag_mode_list = ["hybrid"]
         mock_client_cls.return_value.__enter__.return_value.post.return_value = _mock_post_ok({"response": ""})
         results = search_knowledge("test")
         assert results == []
@@ -80,3 +99,21 @@ class TestSearchKnowledge:
     def test_empty_query_returns_empty(self, mock_get_token):
         results = search_knowledge("")
         assert results == []
+
+    @patch("app.services.rag.httpx.Client")
+    @patch("app.services.rag.settings")
+    def test_mode_cascade_uses_second_mode_on_empty(self, mock_settings, mock_client_cls, mock_get_token):
+        mock_settings.rag_api_url = "http://rag:9621"
+        mock_settings.rag_api_key = "sk-key"
+        mock_settings.rag_response_type = "Multiple Paragraphs"
+        mock_settings.rag_top_k = 10
+        mock_settings.rag_mode_list = ["hybrid", "local"]
+
+        client = mock_client_cls.return_value.__enter__.return_value
+        client.post.side_effect = [
+            _mock_post_ok({"response": "No relevant context found for the query."}),
+            _mock_post_ok({"response": "Found on local"}),
+        ]
+
+        results = search_knowledge("printer issue")
+        assert results == ["Found on local"]

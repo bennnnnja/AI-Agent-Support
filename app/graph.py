@@ -7,6 +7,10 @@ from app.nodes.generate import generate_response
 from app.nodes.post_comment import post_comment_node
 
 
+def route_after_ingest(state: AgentState) -> str:
+    return "end" if state.get("escalated") else "classify"
+
+
 
 def route_by_category(state: AgentState) -> str:
     category = state.get("category", "unclear")
@@ -33,7 +37,10 @@ def build_graph():
     graph.set_entry_point("ingest_event")
 
     # Переходы
-    graph.add_edge("ingest_event", "classify_request")
+    graph.add_conditional_edges("ingest_event", route_after_ingest, {
+        "classify": "classify_request",
+        "end": END,
+    })
 
     # Ветвление по категории
     graph.add_conditional_edges("classify_request", route_by_category, {
