@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     rag_top_k: int = 10
     rag_response_type: str = "Multiple Paragraphs"
     rag_max_query_chars: int = 1500
+    rag_timeout_budget: int = 10
     
     # Jira MCP
     jira_url: str = "http://localhost:8080"
@@ -36,6 +37,12 @@ class Settings(BaseSettings):
     escalation_statuses: str = "In Progress,In Review,Escalated,Waiting for support"
     support_usernames: str = ""  # CSV list of support usernames (optional)
     max_self_help_attempts: int = 3
+    escalation_message_template: str = (
+        "Ваше обращение передано специалисту технической поддержки.\n\n"
+        "Причина: {reason}\n"
+        "Номер обращения: {ticket_id}\n\n"
+        "Специалист свяжется с вами в ближайшее время."
+    )
 
     @property
     def escalation_status_set(self) -> set[str]:

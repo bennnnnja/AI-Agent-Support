@@ -1,5 +1,6 @@
 import logging
 import httpx
+import time
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -88,11 +89,11 @@ def _extract_results(data: dict) -> list[str]:
     return []
 
 
-def _query_once(base: str, headers: dict, query: str, mode: str) -> list[str]:
+def _query_once(base: str, headers: dict, query: str, mode: str, timeout: float = 60.0) -> list[str]:
     global _rag_token
     payload = _build_payload(query, mode)
 
-    with httpx.Client(timeout=60.0) as client:
+    with httpx.Client(timeout=timeout) as client:
         response = client.post(f"{base}/query", json=payload, headers=headers)
         if response.status_code == 401:
             _rag_token = None
@@ -107,7 +108,7 @@ def _query_once(base: str, headers: dict, query: str, mode: str) -> list[str]:
 
 
 def search_knowledge(query: str) -> list[str]:
-    """Search knowledge base via LightRAG API with mode cascade."""
+    """Search knowledge base via LightRAG API with mode cascade and time budget."""
     global _rag_token
     if not query or not query.strip():
         logger.warning("[RAG] Empty query provided")
@@ -120,10 +121,22 @@ def search_knowledge(query: str) -> list[str]:
         if token:
             headers["Authorization"] = f"Bearer {token}"
 
+    budget = settings.rag_timeout_budget
+    start = time.monotonic()
+
     try:
         logger.debug(f"[RAG] Searching: {query[:100]}...")
         for mode in settings.rag_mode_list:
-            results = _query_once(base, headers, query, mode)
+            elapsed = time.monotonic() - start
+            if elapsed >= budget:
+                logger.warning(f"[RAG] Time budget exhausted after {elapsed:.1f}s")
+                break
+            remaining = max(budget - elapsed, 2.0)
+            try:
+                results = _query_once(base, headers, query, mode, timeout=remaining)
+            except httpx.TimeoutException:
+                logger.warning(f"[RAG] Timeout on mode={mode} after {time.monotonic() - start:.1f}s")
+                continue
             if results:
                 logger.info(f"[RAG] Hit on mode={mode} ({len(results)} results)")
                 return results
@@ -138,7 +151,8 @@ def search_knowledge(query: str) -> list[str]:
         return []
 
     except httpx.TimeoutException:
-        logger.error("[RAG] Request timeout (60s)")
+        elapsed = time.monotonic() - start
+        logger.error(f"[RAG] Request timeout after {elapsed:.1f}s")
         return []
 
     except Exception as e:

@@ -4,11 +4,11 @@ from app.nodes.ingest import ingest_event
 from app.nodes.classify import classify_request
 from app.nodes.search_knowledge import search_knowledge_node
 from app.nodes.generate import generate_response
-from app.nodes.post_comment import post_comment_node
+from app.nodes.post_comment import post_comment_node, post_escalation_node
 
 
 def route_after_ingest(state: AgentState) -> str:
-    return "end" if state.get("escalated") else "classify"
+    return "escalate" if state.get("escalated") else "classify"
 
 
 
@@ -32,14 +32,16 @@ def build_graph():
     graph.add_node("search_knowledge", search_knowledge_node)
     graph.add_node("generate_response", generate_response)
     graph.add_node("post_comment", post_comment_node)
+    graph.add_node("post_escalation_comment", post_escalation_node)
 
     # Точка входа
     graph.set_entry_point("ingest_event")
 
     # Переходы
-    graph.add_conditional_edges("ingest_event", route_after_ingest, {
+    graph.add_conditional_edges("ingest_event", route_after_ingest, 
+    {
         "classify": "classify_request",
-        "end": END,
+        "escalate": "post_escalation_comment",
     })
 
     # Ветвление по категории
@@ -51,5 +53,6 @@ def build_graph():
     graph.add_edge("search_knowledge", "generate_response")
     graph.add_edge("generate_response", "post_comment")
     graph.add_edge("post_comment", END)
+    graph.add_edge("post_escalation_comment", END)
 
     return graph.compile()

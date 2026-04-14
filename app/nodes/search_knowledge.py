@@ -1,5 +1,6 @@
 import logging
 import re
+import time
 from app.state import AgentState
 from app.services.rag import search_knowledge
 from app.config import settings
@@ -61,6 +62,7 @@ def search_knowledge_node(state: AgentState) -> AgentState:
 
     try:
         logger.info(f"Searching knowledge base (query len={len(query)})")
+        t0 = time.monotonic()
         results = search_knowledge(query) or []
 
         if not results:
@@ -69,14 +71,16 @@ def search_knowledge_node(state: AgentState) -> AgentState:
                 logger.info(f"Retrying knowledge search with short query (len={len(short_q)})")
                 results = search_knowledge(short_q) or []
 
+        rag_latency_ms = int((time.monotonic() - t0) * 1000)
+
         if results:
-            logger.info(f"Found {len(results)} RAG results")
+            logger.info(f"Found {len(results)} RAG results in {rag_latency_ms}ms")
             logger.debug(f"Results preview: {str(results)[:200]}")
         else:
-            logger.warning("No RAG results found for query")
+            logger.warning(f"No RAG results found for query ({rag_latency_ms}ms)")
 
-        return {**state, "rag_results": results}
+        return {**state, "rag_results": results, "rag_latency_ms": rag_latency_ms}
 
     except Exception as e:
         logger.error(f"Knowledge search failed: {e}", exc_info=True)
-        return {**state, "rag_results": []}
+        return {**state, "rag_results": [], "rag_latency_ms": 0}

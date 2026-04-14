@@ -28,6 +28,7 @@ class AgentState(TypedDict, total=False):
 
     # RAG
     rag_results: list[str]
+    rag_latency_ms: int
 
     # Генерация
     response: str | None

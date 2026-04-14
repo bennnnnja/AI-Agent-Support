@@ -169,13 +169,25 @@ def main():
                 result = graph.invoke(initial_state)
 
                 logger.info(f"Result for {issue_key}:")
-                logger.info(f"  Category: {result.get('category')}")
+                logger.info(f"Category: {result.get('category')}")
                 response_preview = result.get("response")
                 if isinstance(response_preview, str):
                     response_preview = response_preview[:100]
                 else:
                     response_preview = "None"
-                logger.info(f"  Response: {response_preview}")
+                logger.info(f"Response: {response_preview}")
+                logger.info(
+                    "[METRICS] ticket=%s classification=%s rag_hits=%d rag_latency_ms=%d "
+                    "attempt_count=%d escalated=%s escalation_reason=%s resolution=%s",
+                    issue_key,
+                    result.get("category"),
+                    len(result.get("rag_results", [])),
+                    result.get("rag_latency_ms", 0),
+                    result.get("attempt_count", 0),
+                    result.get("escalated", False),
+                    result.get("escalation_reason"),
+                    result.get("resolution"),
+                )
                 ack_event(client, message_id)
             except Exception as e:
                 logger.error(f"Graph execution failed for {issue_key}: {e}", exc_info=True)
