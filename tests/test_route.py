@@ -27,11 +27,18 @@ class TestRouteByCategory:
 
 
 class TestRouteAfterIngest:
-    def test_escalated_true_goes_to_end(self):
-        assert route_after_ingest({"escalated": True}) == "end"
+    def test_escalated_true_goes_to_escalate(self):
+        assert route_after_ingest({"escalated": True}) == "escalate"
 
     def test_escalated_false_goes_to_classify(self):
         assert route_after_ingest({"escalated": False}) == "classify"
 
     def test_missing_escalated_goes_to_classify(self):
         assert route_after_ingest({}) == "classify"
+
+    def test_skip_true_goes_to_skip(self):
+        # skip takes precedence over escalation
+        assert route_after_ingest({"skip": True, "escalated": True}) == "skip"
+
+    def test_skip_true_no_escalation(self):
+        assert route_after_ingest({"skip": True}) == "skip"

@@ -8,9 +8,11 @@ class TestIngestEvent:
     @patch("app.nodes.ingest.settings")
     def test_normal_case_populates_state(self, mock_settings, mock_get_issue, base_state, sample_jira_issue):
         mock_settings.bot_username = "Agent"
-        # Business rule: escalation is tied to support role/usernames, not any assignee.
-        mock_settings.support_username_set = {"Support"}
+        # support_username_set is lowercased at config level; business rule
+        # is escalation is tied to support role/usernames, not any assignee.
+        mock_settings.support_username_set = {"support"}
         mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 3
         mock_get_issue.return_value = sample_jira_issue
 
         from app.nodes.ingest import ingest_event
@@ -29,6 +31,7 @@ class TestIngestEvent:
         mock_settings.bot_username = "Agent"
         mock_settings.support_username_set = set()
         mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 3
         mock_get_issue.return_value = sample_jira_issue
 
         from app.nodes.ingest import ingest_event
@@ -50,10 +53,20 @@ class TestIngestEvent:
     @patch("app.nodes.ingest.get_issue")
     @patch("app.nodes.ingest.settings")
     def test_empty_user_message_filled_from_summary(self, mock_settings, mock_get_issue, sample_jira_issue):
+        """When there are no user-side entries in history, empty user_message falls back to issue summary."""
         mock_settings.bot_username = "Agent"
         mock_settings.support_username_set = set()
         mock_settings.escalation_status_set = set()
-        mock_get_issue.return_value = sample_jira_issue
+        mock_settings.max_self_help_attempts = 3
+        # No description (so no Reporter entry) and only a bot comment — forces the summary fallback path.
+        issue_summary_only = {
+            **sample_jira_issue,
+            "description": "",
+            "comments": [
+                {"author": "Agent", "body": "Попробуйте перезагрузить.", "created": ""},
+            ],
+        }
+        mock_get_issue.return_value = issue_summary_only
 
         state = {
             "ticket_id": "TEST-42",
@@ -64,8 +77,33 @@ class TestIngestEvent:
 
         from app.nodes.ingest import ingest_event
         result = ingest_event(state)
-        # Should be enriched with summary + description (since summary alone is <10 chars? No, it's longer)
         assert "Принтер HP не печатает" in result["user_message"]
+
+    @patch("app.nodes.ingest.get_issue")
+    @patch("app.nodes.ingest.settings")
+    def test_empty_user_message_prefers_latest_user_comment(self, mock_settings, mock_get_issue, sample_jira_issue):
+        """When user comments exist, empty user_message is filled from the latest one (not summary)."""
+        mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 3
+        mock_get_issue.return_value = sample_jira_issue
+
+        state = {
+            "ticket_id": "TEST-42",
+            "user_message": "",
+            "is_first_message": False,
+            "conversation_history": [],
+        }
+
+        from app.nodes.ingest import ingest_event
+        result = ingest_event(state)
+        # Latest user comment is "Помогите пожалуйста" from Telegram.
+        # Note: is_first_message=False triggers echo guard because last comment is from bot — so
+        # use is_first_message=True to skip the echo guard for this assertion.
+        state2 = {**state, "is_first_message": True}
+        result2 = ingest_event(state2)
+        assert "Помогите пожалуйста" in result2["user_message"]
 
     @patch("app.nodes.ingest.get_issue")
     @patch("app.nodes.ingest.settings")
@@ -73,6 +111,7 @@ class TestIngestEvent:
         mock_settings.bot_username = "Agent"
         mock_settings.support_username_set = set()
         mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 3
         mock_get_issue.return_value = {
             "issue_key": "T-1",
             "summary": "Bug",
@@ -129,6 +168,7 @@ class TestIngestEvent:
         mock_settings.bot_username = "Agent"
         mock_settings.support_username_set = set()
         mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 3
         mock_get_issue.return_value = {
             "issue_key": "T-1",
             "summary": "Short summary here",
@@ -153,6 +193,7 @@ class TestIngestEvent:
         mock_settings.bot_username = ""
         mock_settings.support_username_set = set()
         mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 3
         mock_get_issue.return_value = sample_jira_issue
 
         state = {"ticket_id": "TEST-42", "user_message": "test",
@@ -168,8 +209,10 @@ class TestIngestEvent:
     @patch("app.nodes.ingest.settings")
     def test_support_comment_gets_support_role(self, mock_settings, mock_get_issue):
         mock_settings.bot_username = "Agent"
-        mock_settings.support_username_set = {"Admin"}
+        # support_username_set stored lowercased; match works case-insensitively
+        mock_settings.support_username_set = {"admin"}
         mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 3
         mock_get_issue.return_value = {
             "issue_key": "T-2",
             "summary": "Help",

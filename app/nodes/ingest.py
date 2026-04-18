@@ -106,11 +106,14 @@ def ingest_event(state: AgentState) -> AgentState:
             })
 
         # Add comments as conversation
+        bot_username_lc = (settings.bot_username or "").lower()
+        support_set_lc = settings.support_username_set  # already lowercased
         for comment in issue.get("comments", []):
             author = comment.get("author", "") or ""
-            if settings.bot_username and author == settings.bot_username:
+            author_lc = author.lower()
+            if bot_username_lc and author_lc == bot_username_lc:
                 role = "assistant"
-            elif author in settings.support_username_set:
+            elif author_lc in support_set_lc:
                 role = "support"
             else:
                 role = "user"
@@ -122,6 +125,23 @@ def ingest_event(state: AgentState) -> AgentState:
             })
 
         logger.info(f"[ingest] Built conversation history with {len(conversation_history)} entries")
+
+        # Guard against processing an echo of our own last comment.
+        # The webhook gateway may strip author metadata, so _validate_event
+        # lets the event through — here we have full Jira context and can tell.
+        if conversation_history and not state.get("is_first_message"):
+            last_msg = conversation_history[-1]
+            if last_msg.get("role") == "assistant":
+                logger.info(
+                    f"[ingest] Latest comment is from bot, skipping re-processing for {ticket_id}"
+                )
+                return {
+                    **state,
+                    "conversation_history": conversation_history,
+                    "resolution": "skipped_bot_echo",
+                    "escalated": False,
+                    "skip": True,
+                }
 
         # Update state with issue details
         updated_state = {
