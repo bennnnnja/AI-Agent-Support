@@ -1,6 +1,7 @@
 """Tests for nodes/ingest.ingest_event — Jira issue loading and conversation history."""
 import pytest
 from unittest.mock import patch
+import app.services.jira_mcp as jira_mcp
 
 
 class TestIngestEvent:
@@ -204,6 +205,42 @@ class TestIngestEvent:
         # With empty bot_username, all comments should be "user" role
         for entry in result["conversation_history"]:
             assert entry["role"] == "user"
+
+    @patch("app.nodes.ingest.get_issue")
+    @patch("app.nodes.ingest.settings")
+    def test_mcp_account_name_gets_assistant_role(self, mock_settings, mock_get_issue):
+        """Comments from the auto-detected MCP account should get assistant role."""
+        mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 3
+
+        jira_mcp._mcp_account_name = "admin"
+        mock_get_issue.return_value = {
+            "issue_key": "T-3",
+            "summary": "Help",
+            "description": "Desc",
+            "status": "Open",
+            "assignee": "",
+            "priority": "",
+            "created": "",
+            "updated": "",
+            "comments": [
+                {"author": "Telegram", "body": "Help me", "created": ""},
+                {"author": "Admin", "body": "Bot response via MCP", "created": ""},
+            ],
+        }
+
+        from app.nodes.ingest import ingest_event
+        state = {"ticket_id": "T-3", "user_message": "Help", "is_first_message": True, "conversation_history": []}
+        result = ingest_event(state)
+
+        # Description + 2 comments = 3 entries
+        assert len(result["conversation_history"]) == 3
+        assert result["conversation_history"][1]["role"] == "user"
+        assert result["conversation_history"][2]["role"] == "assistant"
+
+        jira_mcp._mcp_account_name = ""
 
     @patch("app.nodes.ingest.get_issue")
     @patch("app.nodes.ingest.settings")

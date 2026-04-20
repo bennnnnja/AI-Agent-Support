@@ -1,7 +1,7 @@
 """Tests for main._validate_event — event validation and bot comment filtering."""
 import pytest
 from unittest.mock import patch
-from app.main import _validate_event
+from app.main import _validate_event, _record_posted_comment, _is_echo_body, _recent_bot_bodies
 
 
 class TestValidateEvent:
@@ -237,3 +237,44 @@ class TestIssueUpdatedFiltering:
         mock_settings.escalation_message_template = "Ваше обращение передано"
         payload = {"issue_key": "TEST-1", "author": "Admin"}
         assert _validate_event(payload, "issue_updated") is False
+
+
+class TestBodyHashTracking:
+    """Test body-hash echo detection."""
+
+    def setup_method(self):
+        _recent_bot_bodies.clear()
+
+    def test_record_and_detect_echo(self):
+        _record_posted_comment("TEST-1", "Hello, this is a bot response.")
+        assert _is_echo_body("TEST-1", "Hello, this is a bot response.") is True
+
+    def test_no_false_positive(self):
+        _record_posted_comment("TEST-1", "Bot response A")
+        assert _is_echo_body("TEST-1", "User says something else") is False
+
+    def test_different_ticket_no_match(self):
+        _record_posted_comment("TEST-1", "Bot response")
+        assert _is_echo_body("TEST-2", "Bot response") is False
+
+    def test_empty_body_ignored(self):
+        _record_posted_comment("TEST-1", "")
+        assert _is_echo_body("TEST-1", "") is False
+
+    def test_whitespace_normalized(self):
+        _record_posted_comment("TEST-1", "  Hello world  ")
+        assert _is_echo_body("TEST-1", "  Hello world  ") is True
+
+    @patch("app.main.settings")
+    def test_echo_body_filters_comment_event(self, mock_settings):
+        """Body-hash match should filter comment_added event with no author."""
+        mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.bot_comment_marker = ""
+        mock_settings.escalation_message_template = "Ваше обращение передано"
+        _record_posted_comment("TEST-1", "Попробуйте перезагрузить принтер.")
+        payload = {
+            "issue_key": "TEST-1",
+            "body": "Попробуйте перезагрузить принтер.",
+        }
+        assert _validate_event(payload, "comment_added") is False

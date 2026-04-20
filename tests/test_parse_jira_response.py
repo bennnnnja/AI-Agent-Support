@@ -1,7 +1,7 @@
 """Tests for jira_mcp._parse_jira_response — Jira response parsing (3 formats)."""
 import json
 import pytest
-from app.services.jira_mcp import _parse_jira_response
+from app.services.jira_mcp import _parse_jira_response, _extract_author
 
 
 class TestEmptyAndInvalidInput:
@@ -186,3 +186,93 @@ class TestSimplifiedMcpFormat:
         result = _parse_jira_response(json.dumps(data))
         assert len(result["comments"]) == 1
         assert result["comments"][0]["author"] == "A"
+
+    def test_flat_comment_with_dict_author(self):
+        """mcp-atlassian may return author as a dict."""
+        data = {
+            "key": "TEST-1", "summary": "X", "description": "",
+            "comments": [
+                {"author": {"displayName": "Admin", "name": "admin"}, "body": "Hi", "created": ""},
+            ]
+        }
+        result = _parse_jira_response(json.dumps(data))
+        assert result["comments"][0]["author"] == "Admin"
+
+    def test_flat_comment_with_name_only_dict_author(self):
+        """Author dict with only 'name' field (no displayName)."""
+        data = {
+            "key": "TEST-1", "summary": "X", "description": "",
+            "comments": [
+                {"author": {"name": "admin"}, "body": "Hi", "created": ""},
+            ]
+        }
+        result = _parse_jira_response(json.dumps(data))
+        assert result["comments"][0]["author"] == "admin"
+
+
+class TestExtractAuthor:
+
+    def test_string_author(self):
+        assert _extract_author("Alice") == "Alice"
+
+    def test_dict_with_display_name(self):
+        assert _extract_author({"displayName": "Alice", "name": "alice"}) == "Alice"
+
+    def test_dict_with_name_only(self):
+        assert _extract_author({"name": "admin"}) == "admin"
+
+    def test_dict_with_account_id_only(self):
+        assert _extract_author({"accountId": "abc123"}) == "abc123"
+
+    def test_empty_dict(self):
+        assert _extract_author({}) == "Unknown"
+
+    def test_none(self):
+        assert _extract_author(None) == "Unknown"
+
+    def test_empty_string(self):
+        assert _extract_author("") == "Unknown"
+
+
+class TestRawJiraAuthorFallback:
+    """Raw Jira API format: author dict with only 'name' (no displayName)."""
+
+    def test_comment_author_name_fallback(self):
+        data = {
+            "key": "TEST-10",
+            "fields": {
+                "summary": "Test",
+                "description": "",
+                "status": {"name": "Open"},
+                "assignee": None,
+                "priority": {"name": "Low"},
+                "comment": {
+                    "comments": [
+                        {"author": {"name": "admin"}, "body": "comment", "created": ""},
+                    ]
+                },
+                "created": "", "updated": "",
+            }
+        }
+        result = _parse_jira_response(json.dumps(data))
+        assert result["comments"][0]["author"] == "admin"
+
+    def test_comment_author_account_id_fallback(self):
+        data = {
+            "key": "TEST-10",
+            "fields": {
+                "summary": "Test",
+                "description": "",
+                "status": {"name": "Open"},
+                "assignee": None,
+                "priority": {"name": "Low"},
+                "comment": {
+                    "comments": [
+                        {"author": {"accountId": "5f3c"}, "body": "comment", "created": ""},
+                    ]
+                },
+                "created": "", "updated": "",
+            }
+        }
+        result = _parse_jira_response(json.dumps(data))
+        assert result["comments"][0]["author"] == "5f3c"

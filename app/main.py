@@ -1,5 +1,8 @@
+import hashlib
 import json
 import logging
+import time
+
 from app.config import settings
 from app.services.redis_consumer import get_redis_client, ensure_group, read_events, ack_event
 from app.graph import build_graph
@@ -10,6 +13,25 @@ logging.basicConfig(
     format="[%(asctime)s] %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+COOLDOWN_SECONDS = 15
+_ticket_cooldowns: dict[str, float] = {}
+
+_recent_bot_bodies: dict[str, set[str]] = {}
+
+
+def _record_posted_comment(ticket_id: str, body: str) -> None:
+    if not body:
+        return
+    h = hashlib.md5(body.strip()[:500].encode()).hexdigest()
+    _recent_bot_bodies.setdefault(ticket_id, set()).add(h)
+
+
+def _is_echo_body(ticket_id: str, body: str) -> bool:
+    if not body or ticket_id not in _recent_bot_bodies:
+        return False
+    h = hashlib.md5(body.strip()[:500].encode()).hexdigest()
+    return h in _recent_bot_bodies[ticket_id]
 
 
 def _parse_event_payload(event: dict) -> dict:
@@ -92,6 +114,9 @@ def _validate_event(payload: dict, event_type: str) -> bool:
             if _looks_like_bot_comment(comment_body):
                 logger.info(f"[FILTER] Ignoring bot-like comment (body match) on {issue_key}")
                 return False
+            if _is_echo_body(issue_key, comment_body):
+                logger.info(f"[FILTER] Ignoring echo comment (body-hash match) on {issue_key}")
+                return False
             # Role/source, if present, still must indicate a user.
             if role and role not in user_like_roles:
                 logger.info(f"[FILTER] Skipping comment role={role} on {issue_key}")
@@ -147,6 +172,14 @@ def main():
             event_type = raw_event.get("event_type", "")
             issue_key = payload.get("issue_key") or raw_event.get("issue_key", "")
             payload["issue_key"] = issue_key  # ensure issue_key is in payload
+
+            # Per-ticket cooldown: prevent re-processing the same ticket too soon
+            now = time.time()
+            last_time = _ticket_cooldowns.get(issue_key, 0)
+            if event_type != "issue_created" and (now - last_time) < COOLDOWN_SECONDS:
+                logger.info(f"[COOLDOWN] Skipping {event_type} for {issue_key} ({now - last_time:.1f}s < {COOLDOWN_SECONDS}s)")
+                ack_event(client, message_id)
+                continue
 
             # Validate event
             if not _validate_event(payload, event_type):
@@ -212,6 +245,14 @@ def main():
                     result.get("escalation_reason"),
                     result.get("resolution"),
                 )
+
+                _ticket_cooldowns[issue_key] = time.time()
+
+                resolution = result.get("resolution") or ""
+                if resolution in ("comment_posted", "escalation_posted"):
+                    response_body = result.get("response") or ""
+                    _record_posted_comment(issue_key, response_body)
+
                 ack_event(client, message_id)
             except Exception as e:
                 logger.error(f"Graph execution failed for {issue_key}: {e}", exc_info=True)

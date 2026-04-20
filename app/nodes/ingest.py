@@ -1,6 +1,6 @@
 import logging
 from app.state import AgentState
-from app.services.jira_mcp import get_issue
+from app.services.jira_mcp import get_issue, get_mcp_account_name
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -107,11 +107,14 @@ def ingest_event(state: AgentState) -> AgentState:
 
         # Add comments as conversation
         bot_username_lc = (settings.bot_username or "").lower()
+        mcp_name_lc = get_mcp_account_name() or ""
         support_set_lc = settings.support_username_set  # already lowercased
         for comment in issue.get("comments", []):
             author = comment.get("author", "") or ""
             author_lc = author.lower()
             if bot_username_lc and author_lc == bot_username_lc:
+                role = "assistant"
+            elif mcp_name_lc and author_lc == mcp_name_lc:
                 role = "assistant"
             elif author_lc in support_set_lc:
                 role = "support"
