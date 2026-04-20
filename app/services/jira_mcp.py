@@ -200,3 +200,38 @@ def add_comment(issue_key: str, comment: str) -> str:
     else:
         logger.warning(f"[Jira] add_comment returned empty response for {issue_key}")
     return result
+
+
+def transition_issue(issue_key: str, transition_name: str) -> str:
+    """Transition a Jira issue to a new status (by transition or target status name)."""
+    if not transition_name:
+        return ""
+    try:
+        result = asyncio.run(_call("jira_transition_issue", {
+            "issue_key": issue_key,
+            "transition": transition_name,
+        }))
+        if result:
+            logger.info(f"[Jira] transition_issue response: {result[:200]}")
+        return result
+    except MCPError as e:
+        logger.error(f"[Jira] transition_issue failed for {issue_key} -> {transition_name}: {e}")
+        raise
+
+
+def assign_issue(issue_key: str, assignee: str) -> str:
+    """Assign a Jira issue to a user by username."""
+    if not assignee:
+        return ""
+    try:
+        fields_payload = json.dumps({"assignee": {"name": assignee}})
+        result = asyncio.run(_call("jira_update_issue", {
+            "issue_key": issue_key,
+            "fields": fields_payload,
+        }))
+        if result:
+            logger.info(f"[Jira] assign_issue response: {result[:200]}")
+        return result
+    except MCPError as e:
+        logger.error(f"[Jira] assign_issue failed for {issue_key} -> {assignee}: {e}")
+        raise

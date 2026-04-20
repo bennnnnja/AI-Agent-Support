@@ -5,6 +5,7 @@ from app.nodes.classify import classify_request
 from app.nodes.search_knowledge import search_knowledge_node
 from app.nodes.generate import generate_response
 from app.nodes.post_comment import post_comment_node, post_escalation_node
+from app.nodes.transition import transition_node
 
 
 def route_after_ingest(state: AgentState) -> str:
@@ -35,6 +36,7 @@ def build_graph():
     graph.add_node("generate_response", generate_response)
     graph.add_node("post_comment", post_comment_node)
     graph.add_node("post_escalation_comment", post_escalation_node)
+    graph.add_node("transition_status", transition_node)
 
     # Точка входа
     graph.set_entry_point("ingest_event")
@@ -55,7 +57,8 @@ def build_graph():
 
     graph.add_edge("search_knowledge", "generate_response")
     graph.add_edge("generate_response", "post_comment")
-    graph.add_edge("post_comment", END)
-    graph.add_edge("post_escalation_comment", END)
+    graph.add_edge("post_comment", "transition_status")
+    graph.add_edge("post_escalation_comment", "transition_status")
+    graph.add_edge("transition_status", END)
 
     return graph.compile()

@@ -47,6 +47,13 @@ class Settings(BaseSettings):
         "Специалист свяжется с вами в ближайшее время."
     )
 
+    # Jira workflow — status transitions (leave empty to disable a given transition)
+    status_in_progress: str = ""   # e.g. "В работе" / "In Progress"
+    status_resolved: str = ""      # e.g. "Готово" / "Done"
+    status_escalated: str = ""     # e.g. "Эскалировано" / "Escalated"
+    # Username to reassign the ticket to when escalating (empty = keep current assignee)
+    escalation_assignee: str = ""
+
     @property
     def escalation_status_set(self) -> set[str]:
         return {

@@ -90,6 +90,13 @@ def _validate_event(payload: dict, event_type: str) -> bool:
         logger.warning("Event missing event_type, skipping")
         return False
 
+    # Block all events for tickets already in an escalated/in-progress workflow state.
+    # Support is working the ticket — the agent must step away entirely.
+    payload_status = (payload.get("status") or "").strip().lower()
+    if payload_status and payload_status in settings.escalation_status_set:
+        logger.info(f"[FILTER] Skipping event for escalated ticket {issue_key} (status={payload_status})")
+        return False
+
     user_like_roles = {"user", "admin", "administrator", "telegram", "customer"}
     user_like_sources = {"telegram", "web", "portal", "customer"}
 

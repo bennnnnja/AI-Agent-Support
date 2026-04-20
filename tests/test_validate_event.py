@@ -272,9 +272,44 @@ class TestBodyHashTracking:
         mock_settings.support_username_set = set()
         mock_settings.bot_comment_marker = ""
         mock_settings.escalation_message_template = "Ваше обращение передано"
+        mock_settings.escalation_status_set = set()
         _record_posted_comment("TEST-1", "Попробуйте перезагрузить принтер.")
         payload = {
             "issue_key": "TEST-1",
             "body": "Попробуйте перезагрузить принтер.",
         }
         assert _validate_event(payload, "comment_added") is False
+
+
+class TestEscalatedStatusFiltering:
+    """Events for tickets already in an escalated workflow state must be dropped."""
+
+    @patch("app.main.settings")
+    def test_escalated_status_blocks_comment_event(self, mock_settings):
+        mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.bot_comment_marker = ""
+        mock_settings.escalation_message_template = "Ваше обращение передано"
+        mock_settings.escalation_status_set = {"escalated", "in progress"}
+        payload = {"issue_key": "TEST-1", "status": "Escalated", "author": "User"}
+        assert _validate_event(payload, "comment_added") is False
+
+    @patch("app.main.settings")
+    def test_escalated_status_case_insensitive(self, mock_settings):
+        mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.bot_comment_marker = ""
+        mock_settings.escalation_message_template = "Ваше обращение передано"
+        mock_settings.escalation_status_set = {"in progress"}
+        payload = {"issue_key": "TEST-1", "status": "IN PROGRESS", "author": "User"}
+        assert _validate_event(payload, "issue_updated") is False
+
+    @patch("app.main.settings")
+    def test_non_escalated_status_allowed(self, mock_settings):
+        mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.bot_comment_marker = ""
+        mock_settings.escalation_message_template = "Ваше обращение передано"
+        mock_settings.escalation_status_set = {"escalated"}
+        payload = {"issue_key": "TEST-1", "status": "Open", "author": "User"}
+        assert _validate_event(payload, "comment_added") is True

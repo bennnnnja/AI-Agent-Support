@@ -244,6 +244,115 @@ class TestIngestEvent:
 
     @patch("app.nodes.ingest.get_issue")
     @patch("app.nodes.ingest.settings")
+    def test_explicit_escalation_request_from_user_message(self, mock_settings, mock_get_issue):
+        """User typing 'переведи на специалиста' must trigger immediate escalation."""
+        mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 3
+        mock_get_issue.return_value = {
+            "issue_key": "T-100", "summary": "Printer", "description": "",
+            "status": "Open", "assignee": "", "priority": "",
+            "created": "", "updated": "",
+            "comments": [],
+        }
+
+        state = {
+            "ticket_id": "T-100",
+            "user_message": "переведи на специалиста",
+            "is_first_message": False,
+            "conversation_history": [],
+        }
+
+        from app.nodes.ingest import ingest_event
+        result = ingest_event(state)
+        assert result["escalated"] is True
+        assert result["escalation_reason"] == "user_requested_human"
+
+    @patch("app.nodes.ingest.get_issue")
+    @patch("app.nodes.ingest.settings")
+    def test_explicit_escalation_request_from_comment_history(self, mock_settings, mock_get_issue):
+        """Escalation phrase in the latest user comment triggers escalation."""
+        mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 10  # high so attempt_limit is not the reason
+        mock_get_issue.return_value = {
+            "issue_key": "T-101", "summary": "Printer", "description": "",
+            "status": "Open", "assignee": "", "priority": "",
+            "created": "", "updated": "",
+            "comments": [
+                {"author": "Telegram", "body": "Нужен живой человек", "created": ""},
+            ],
+        }
+
+        state = {
+            "ticket_id": "T-101",
+            "user_message": "",
+            "is_first_message": False,
+            "conversation_history": [],
+        }
+
+        from app.nodes.ingest import ingest_event
+        result = ingest_event(state)
+        assert result["escalated"] is True
+        assert result["escalation_reason"] == "user_requested_human"
+
+    @patch("app.nodes.ingest.get_issue")
+    @patch("app.nodes.ingest.settings")
+    def test_no_escalation_phrase_not_triggered(self, mock_settings, mock_get_issue):
+        mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 10
+        mock_get_issue.return_value = {
+            "issue_key": "T-102", "summary": "Printer", "description": "",
+            "status": "Open", "assignee": "", "priority": "",
+            "created": "", "updated": "",
+            "comments": [
+                {"author": "Telegram", "body": "Не могу распечатать", "created": ""},
+            ],
+        }
+
+        state = {
+            "ticket_id": "T-102",
+            "user_message": "Не могу распечатать",
+            "is_first_message": False,
+            "conversation_history": [],
+        }
+
+        from app.nodes.ingest import ingest_event
+        result = ingest_event(state)
+        assert result.get("escalated") is False
+
+    @patch("app.nodes.ingest.get_issue")
+    @patch("app.nodes.ingest.settings")
+    def test_escalation_request_case_insensitive(self, mock_settings, mock_get_issue):
+        mock_settings.bot_username = "Agent"
+        mock_settings.support_username_set = set()
+        mock_settings.escalation_status_set = set()
+        mock_settings.max_self_help_attempts = 10
+        mock_get_issue.return_value = {
+            "issue_key": "T-103", "summary": "Printer", "description": "",
+            "status": "Open", "assignee": "", "priority": "",
+            "created": "", "updated": "",
+            "comments": [],
+        }
+
+        state = {
+            "ticket_id": "T-103",
+            "user_message": "ПЕРЕВЕДИ НА СПЕЦИАЛИСТА пожалуйста",
+            "is_first_message": True,
+            "conversation_history": [],
+        }
+
+        from app.nodes.ingest import ingest_event
+        result = ingest_event(state)
+        assert result["escalated"] is True
+        assert result["escalation_reason"] == "user_requested_human"
+
+    @patch("app.nodes.ingest.get_issue")
+    @patch("app.nodes.ingest.settings")
     def test_support_comment_gets_support_role(self, mock_settings, mock_get_issue):
         mock_settings.bot_username = "Agent"
         # support_username_set stored lowercased; match works case-insensitively

@@ -45,6 +45,41 @@ def _extract_latest_user_message(conversation_history: list[dict]) -> str:
     return ""
 
 
+_ESCALATION_REQUEST_PHRASES = (
+    "переведи на специалист",
+    "переведите на специалист",
+    "перевести на специалист",
+    "перевод на специалист",
+    "передайте специалист",
+    "передай специалист",
+    "соедини со специалист",
+    "соедините со специалист",
+    "позови специалист",
+    "позовите специалист",
+    "позови человек",
+    "позовите человек",
+    "нужен специалист",
+    "нужен живой",
+    "нужен человек",
+    "хочу оператор",
+    "хочу к специалист",
+    "свяжите со специалист",
+    "свяжите с оператор",
+    "переключи на оператор",
+    "переключи на специалист",
+    "пригласите специалист",
+    "живой человек",
+)
+
+
+def _explicit_escalation_requested(text: str) -> bool:
+    """Detect direct user requests to escalate to a human specialist."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(phrase in lowered for phrase in _ESCALATION_REQUEST_PHRASES)
+
+
 def _is_escalated(
     issue_status: str,
     issue_assignee,
@@ -188,6 +223,19 @@ def ingest_event(state: AgentState) -> AgentState:
         if len((updated_state.get("user_message") or "")) < 10 and issue.get("description"):
             logger.info(f"[ingest] Enriching message with issue description")
             updated_state["user_message"] = f"{issue.get('summary', '')}\n\n{issue.get('description', '')}"
+
+        # Explicit user request to escalate ("переведи на специалиста" etc.) — honour immediately.
+        if not updated_state.get("escalated"):
+            final_user_msg = updated_state.get("user_message", "") or ""
+            latest_user_msg = _extract_latest_user_message(conversation_history)
+            if (
+                _explicit_escalation_requested(final_user_msg)
+                or _explicit_escalation_requested(latest_user_msg)
+            ):
+                updated_state["escalated"] = True
+                updated_state["escalation_reason"] = "user_requested_human"
+                updated_state["resolution"] = "skipped_escalated"
+                logger.info(f"[ESCALATED] {ticket_id} reason=user_requested_human")
 
         return updated_state
 

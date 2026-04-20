@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 _ESCALATION_REASON_MAP = {
     "forced_by_microservice": "Запрос требует участия специалиста",
     "attempt_limit": "Автоматические рекомендации не помогли решить проблему",
+    "user_requested_human": "Пользователь запросил перевод на специалиста",
 }
 
 
@@ -41,7 +42,18 @@ def post_comment_node(state: AgentState) -> AgentState:
             return {**state, "resolution": "warning_empty_mcp_response"}
 
         logger.info(f"Successfully posted comment to {ticket_id}")
-        return {**state, "resolution": "comment_posted"}
+        updated: dict = {**state, "resolution": "comment_posted"}
+        # Move to "In Progress" only after first agent reply, and only if the ticket
+        # is not already in a workflow-advanced state.
+        current_status_lc = (state.get("issue_status") or "").strip().lower()
+        target = (settings.status_in_progress or "").strip()
+        if (
+            state.get("is_first_message")
+            and target
+            and current_status_lc != target.lower()
+        ):
+            updated["transition_to_status"] = target
+        return updated
     except MCPError as e:
         logger.error(f"MCP error posting comment to {ticket_id}: {e}")
         return {**state, "resolution": f"error_posting_comment: {e}"}
@@ -89,13 +101,20 @@ def post_escalation_node(state: AgentState) -> AgentState:
     try:
         logger.info(f"Posting escalation comment to {ticket_id} (reason={reason})")
         result = add_comment(ticket_id, message)
- 
+
         if not result:
             logger.warning(f"MCP returned empty response for escalation on {ticket_id}")
             return {**state, "resolution": "escalation_posted_empty_mcp"}
- 
+
         logger.info(f"Successfully posted escalation comment to {ticket_id}")
-        return {**state, "resolution": "escalation_posted"}
+        updated: dict = {**state, "resolution": "escalation_posted"}
+        target = (settings.status_escalated or "").strip()
+        if target:
+            updated["transition_to_status"] = target
+        new_assignee = (settings.escalation_assignee or "").strip()
+        if new_assignee:
+            updated["reassign_to"] = new_assignee
+        return updated
     except MCPError as e:
         logger.error(f"MCP error posting escalation to {ticket_id}: {e}")
         return {**state, "resolution": f"error_posting_escalation: {e}"}
