@@ -1,5 +1,8 @@
+import hashlib
 import json
 import logging
+import time
+
 from app.config import settings
 from app.services.redis_consumer import get_redis_client, ensure_group, read_events, ack_event
 from app.graph import build_graph
@@ -10,6 +13,25 @@ logging.basicConfig(
     format="[%(asctime)s] %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+COOLDOWN_SECONDS = 15
+_ticket_cooldowns: dict[str, float] = {}
+
+_recent_bot_bodies: dict[str, set[str]] = {}
+
+
+def _record_posted_comment(ticket_id: str, body: str) -> None:
+    if not body:
+        return
+    h = hashlib.md5(body.strip()[:500].encode()).hexdigest()
+    _recent_bot_bodies.setdefault(ticket_id, set()).add(h)
+
+
+def _is_echo_body(ticket_id: str, body: str) -> bool:
+    if not body or ticket_id not in _recent_bot_bodies:
+        return False
+    h = hashlib.md5(body.strip()[:500].encode()).hexdigest()
+    return h in _recent_bot_bodies[ticket_id]
 
 
 def _parse_event_payload(event: dict) -> dict:
@@ -33,6 +55,24 @@ def _parse_event_payload(event: dict) -> dict:
     return {}
 
 
+def _looks_like_bot_comment(body: str) -> bool:
+    """Detect bot's own comments by body content.
+
+    Used as a fallback when the webhook payload doesn't include the author field.
+    Matches against the escalation template prefix and an optional configurable marker.
+    """
+    if not body:
+        return False
+    markers: list[str] = []
+    # First line of the escalation template is a stable, distinctive prefix.
+    esc_first_line = settings.escalation_message_template.split("\n")[0].strip()
+    if esc_first_line:
+        markers.append(esc_first_line[:40])
+    if settings.bot_comment_marker:
+        markers.append(settings.bot_comment_marker)
+    return any(body.startswith(m) for m in markers if m)
+
+
 def _validate_event(payload: dict, event_type: str) -> bool:
     """Validate that event has required fields and should be processed.
 
@@ -53,45 +93,54 @@ def _validate_event(payload: dict, event_type: str) -> bool:
     user_like_roles = {"user", "admin", "administrator", "telegram", "customer"}
     user_like_sources = {"telegram", "web", "portal", "customer"}
 
+    bot_username_lc = (settings.bot_username or "").lower()
+    support_set_lc = settings.support_username_set  # already lowercased in config
+
     # Filter out bot's own comment events to prevent infinite loops
     if event_type in ("comment_added", "comment_created"):
         comment_author = (payload.get("author") or "").strip()
+        comment_author_lc = comment_author.lower()
         role = (payload.get("role") or "").strip().lower()
         source = (payload.get("source") or "").strip().lower()
 
-        if settings.bot_username:
-            if comment_author == settings.bot_username:
-                logger.info(f"[FILTER] Ignoring comment from bot ({comment_author}) on {issue_key}")
-                return False
+        if bot_username_lc and comment_author_lc == bot_username_lc:
+            logger.info(f"[FILTER] Ignoring comment from bot ({comment_author}) on {issue_key}")
+            return False
 
-        # If author is missing, require explicit user-like role/source.
-        # Otherwise we can accidentally reprocess bot comments and loop forever.
+        # If author is missing, fall back to body-based bot detection.
+        # This is the common case when the webhook gateway strips metadata.
         if not comment_author:
-            has_user_signal = (role in user_like_roles) or (source in user_like_sources)
-            if not has_user_signal:
-                logger.info(f"[FILTER] Ignoring comment with no author on {issue_key} (no user signal)")
+            comment_body = (payload.get("body") or "").strip()
+            if _looks_like_bot_comment(comment_body):
+                logger.info(f"[FILTER] Ignoring bot-like comment (body match) on {issue_key}")
                 return False
+            if _is_echo_body(issue_key, comment_body):
+                logger.info(f"[FILTER] Ignoring echo comment (body-hash match) on {issue_key}")
+                return False
+            # Role/source, if present, still must indicate a user.
             if role and role not in user_like_roles:
                 logger.info(f"[FILTER] Skipping comment role={role} on {issue_key}")
                 return False
             if source and source not in user_like_sources:
                 logger.info(f"[FILTER] Skipping comment source={source} on {issue_key}")
                 return False
+            logger.info(f"[FILTER] Allowing comment with no author on {issue_key} (assuming user)")
 
         # Skip comments from support users (if configured)
-        if comment_author and comment_author in settings.support_username_set:
+        if comment_author_lc and comment_author_lc in support_set_lc:
             logger.info(f"[FILTER] Skipping comment from support {comment_author} on {issue_key}")
             return False
 
     # Minimal filter for issue_updated: if author exists and is not a user, skip (prevents reacting to support automation)
     if event_type == "issue_updated":
         author = (payload.get("author") or "").strip()
+        author_lc = author.lower()
         role = (payload.get("role") or "").strip().lower()
         source = (payload.get("source") or "").strip().lower()
-        if author and settings.bot_username and author == settings.bot_username:
+        if author_lc and bot_username_lc and author_lc == bot_username_lc:
             logger.info(f"[FILTER] Skipping issue_updated from bot ({author}) on {issue_key}")
             return False
-        if author and author in settings.support_username_set:
+        if author_lc and author_lc in support_set_lc:
             logger.info(f"[FILTER] Skipping issue_updated from support {author} on {issue_key}")
             return False
         if role and role not in user_like_roles:
@@ -123,6 +172,14 @@ def main():
             event_type = raw_event.get("event_type", "")
             issue_key = payload.get("issue_key") or raw_event.get("issue_key", "")
             payload["issue_key"] = issue_key  # ensure issue_key is in payload
+
+            # Per-ticket cooldown: prevent re-processing the same ticket too soon
+            now = time.time()
+            last_time = _ticket_cooldowns.get(issue_key, 0)
+            if event_type != "issue_created" and (now - last_time) < COOLDOWN_SECONDS:
+                logger.info(f"[COOLDOWN] Skipping {event_type} for {issue_key} ({now - last_time:.1f}s < {COOLDOWN_SECONDS}s)")
+                ack_event(client, message_id)
+                continue
 
             # Validate event
             if not _validate_event(payload, event_type):
@@ -188,6 +245,14 @@ def main():
                     result.get("escalation_reason"),
                     result.get("resolution"),
                 )
+
+                _ticket_cooldowns[issue_key] = time.time()
+
+                resolution = result.get("resolution") or ""
+                if resolution in ("comment_posted", "escalation_posted"):
+                    response_body = result.get("response") or ""
+                    _record_posted_comment(issue_key, response_body)
+
                 ack_event(client, message_id)
             except Exception as e:
                 logger.error(f"Graph execution failed for {issue_key}: {e}", exc_info=True)

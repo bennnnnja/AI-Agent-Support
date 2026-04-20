@@ -8,6 +8,8 @@ from app.nodes.post_comment import post_comment_node, post_escalation_node
 
 
 def route_after_ingest(state: AgentState) -> str:
+    if state.get("skip"):
+        return "skip"
     return "escalate" if state.get("escalated") else "classify"
 
 
@@ -38,10 +40,11 @@ def build_graph():
     graph.set_entry_point("ingest_event")
 
     # Переходы
-    graph.add_conditional_edges("ingest_event", route_after_ingest, 
+    graph.add_conditional_edges("ingest_event", route_after_ingest,
     {
         "classify": "classify_request",
         "escalate": "post_escalation_comment",
+        "skip": END,
     })
 
     # Ветвление по категории

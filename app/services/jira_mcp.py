@@ -11,6 +11,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+_mcp_account_name: str = ""
+
 
 class JiraComment(TypedDict, total=False):
     author: str
@@ -67,6 +69,39 @@ def list_tools() -> list[str]:
     return asyncio.run(_list_tools())
 
 
+def _extract_author(value) -> str:
+    if isinstance(value, dict):
+        return (
+            value.get("displayName")
+            or value.get("name")
+            or value.get("accountId")
+            or "Unknown"
+        )
+    if isinstance(value, str) and value:
+        return value
+    return "Unknown"
+
+
+def get_mcp_account_name() -> str:
+    return _mcp_account_name
+
+
+def _try_detect_mcp_username(response: str) -> None:
+    global _mcp_account_name
+    if _mcp_account_name:
+        return
+    try:
+        data = json.loads(response)
+        if not isinstance(data, dict):
+            return
+        name = _extract_author(data.get("author"))
+        if name and name != "Unknown":
+            _mcp_account_name = name.lower()
+            logger.info(f"[Jira] Auto-detected MCP account name: {name}")
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+
 def _parse_jira_response(raw_response: str) -> JiraIssue:
     """Parse response from MCP Atlassian into structured JiraIssue object.
 
@@ -111,7 +146,7 @@ def _parse_jira_response(raw_response: str) -> JiraIssue:
         comments: list[JiraComment] = []
         for comment_data in fields.get("comment", {}).get("comments", []):
             comments.append({
-                "author": comment_data.get("author", {}).get("displayName", "Unknown") if isinstance(comment_data.get("author"), dict) else str(comment_data.get("author", "Unknown")),
+                "author": _extract_author(comment_data.get("author")),
                 "body": comment_data.get("body", ""),
                 "created": comment_data.get("created", ""),
             })
@@ -136,7 +171,7 @@ def _parse_jira_response(raw_response: str) -> JiraIssue:
             for c in raw_comments:
                 if isinstance(c, dict):
                     comments.append({
-                        "author": c.get("author", "Unknown") if isinstance(c.get("author"), str) else str(c.get("author", "Unknown")),
+                        "author": _extract_author(c.get("author")),
                         "body": c.get("body", "") or c.get("text", ""),
                         "created": c.get("created", ""),
                     })
@@ -161,6 +196,7 @@ def add_comment(issue_key: str, comment: str) -> str:
     result = asyncio.run(_call("jira_add_comment", {"issue_key": issue_key, "body": comment}))
     if result:
         logger.info(f"[Jira] add_comment response: {result[:200]}")
+        _try_detect_mcp_username(result)
     else:
         logger.warning(f"[Jira] add_comment returned empty response for {issue_key}")
     return result

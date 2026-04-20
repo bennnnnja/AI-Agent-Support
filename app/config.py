@@ -32,6 +32,9 @@ class Settings(BaseSettings):
 
     # Agent
     bot_username: str = ""
+    # Optional prefix marker used to detect bot's own comments by body content
+    # (useful when webhook doesn't forward the author field).
+    bot_comment_marker: str = ""
 
     # Escalation / roles
     escalation_statuses: str = "In Progress,In Review,Escalated,Waiting for support"
@@ -54,7 +57,8 @@ class Settings(BaseSettings):
 
     @property
     def support_username_set(self) -> set[str]:
-        return {s.strip() for s in self.support_usernames.split(",") if s.strip()}
+        # Lowercased to allow case-insensitive matching at call sites.
+        return {s.strip().lower() for s in self.support_usernames.split(",") if s.strip()}
 
     @property
     def rag_mode_list(self) -> list[str]:
