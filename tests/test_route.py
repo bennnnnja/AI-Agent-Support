@@ -8,7 +8,7 @@ class TestRouteByCategory:
         assert route_by_category({"category": "tech_support"}) == "search_knowledge"
 
     def test_off_topic(self):
-        assert route_by_category({"category": "off_topic"}) == "end"
+        assert route_by_category({"category": "off_topic"}) == "generate_response"
 
     def test_unclear_goes_to_search(self):
         assert route_by_category({"category": "unclear"}) == "search_knowledge"

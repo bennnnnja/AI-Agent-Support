@@ -21,7 +21,7 @@ def route_by_category(state: AgentState) -> str:
     if category == "tech_support":
         return "search_knowledge"
     elif category == "off_topic":
-        return "end"
+        return "generate_response"
     else:
         return "search_knowledge"
 
@@ -52,7 +52,7 @@ def build_graph():
     # Ветвление по категории
     graph.add_conditional_edges("classify_request", route_by_category, {
         "search_knowledge": "search_knowledge",
-        "end": END,
+        "generate_response": "generate_response",
     })
 
     graph.add_edge("search_knowledge", "generate_response")
