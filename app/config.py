@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     bot_comment_marker: str = ""
 
     # Escalation / roles
-    escalation_statuses: str = "In Progress,In Review,Escalated,Waiting for support"
+    escalation_statuses: str = "Escalated,Waiting for support"
     support_usernames: str = ""  # CSV list of support usernames (optional)
     max_self_help_attempts: int = 3
     escalation_message_template: str = (
