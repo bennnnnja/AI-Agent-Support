@@ -23,6 +23,9 @@ class AgentState(TypedDict, total=False):
     attempt_count: int
     force_escalation: bool
 
+    # Автозакрытие (пользователь подтвердил решение)
+    resolved: bool
+
     # Ранний выход из графа (например, при эхо своего комментария)
     skip: bool
 

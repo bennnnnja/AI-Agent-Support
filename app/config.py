@@ -47,6 +47,10 @@ class Settings(BaseSettings):
         "Специалист свяжется с вами в ближайшее время."
     )
 
+    resolution_message_template: str = (
+        "Рад помочь! Если будут ещё вопросы — обращайтесь."
+    )
+
     # Jira workflow — status transitions (leave empty to disable a given transition)
     status_in_progress: str = ""   # e.g. "В работе" / "In Progress"
     status_resolved: str = ""      # e.g. "Готово" / "Done"

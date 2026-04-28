@@ -19,6 +19,9 @@ _ticket_cooldowns: dict[str, float] = {}
 
 _recent_bot_bodies: dict[str, set[str]] = {}
 
+_escalated_tickets: set[str] = set()
+_resolved_tickets: set[str] = set()
+
 
 def _record_posted_comment(ticket_id: str, body: str) -> None:
     if not body:
@@ -180,6 +183,13 @@ def main():
             issue_key = payload.get("issue_key") or raw_event.get("issue_key", "")
             payload["issue_key"] = issue_key  # ensure issue_key is in payload
 
+            # Terminal state: ticket already escalated or resolved — agent must not respond
+            if issue_key in _escalated_tickets or issue_key in _resolved_tickets:
+                label = "escalated" if issue_key in _escalated_tickets else "resolved"
+                logger.info(f"[TERMINAL] Skipping {event_type} for {issue_key} (already {label})")
+                ack_event(client, message_id)
+                continue
+
             # Per-ticket cooldown: prevent re-processing the same ticket too soon
             now = time.time()
             last_time = _ticket_cooldowns.get(issue_key, 0)
@@ -256,7 +266,12 @@ def main():
                 _ticket_cooldowns[issue_key] = time.time()
 
                 resolution = result.get("resolution") or ""
-                if resolution in ("comment_posted", "escalation_posted"):
+                if resolution == "escalation_posted":
+                    _escalated_tickets.add(issue_key)
+                elif resolution == "resolved_posted":
+                    _resolved_tickets.add(issue_key)
+
+                if resolution in ("comment_posted", "escalation_posted", "resolved_posted"):
                     response_body = result.get("response") or ""
                     _record_posted_comment(issue_key, response_body)
 

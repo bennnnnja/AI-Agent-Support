@@ -42,3 +42,15 @@ class TestRouteAfterIngest:
 
     def test_skip_true_no_escalation(self):
         assert route_after_ingest({"skip": True}) == "skip"
+
+    def test_resolved_true_goes_to_resolve(self):
+        assert route_after_ingest({"resolved": True}) == "resolve"
+
+    def test_resolved_false_goes_to_classify(self):
+        assert route_after_ingest({"resolved": False}) == "classify"
+
+    def test_skip_takes_precedence_over_resolved(self):
+        assert route_after_ingest({"skip": True, "resolved": True}) == "skip"
+
+    def test_resolved_takes_precedence_over_escalated(self):
+        assert route_after_ingest({"resolved": True, "escalated": True}) == "resolve"

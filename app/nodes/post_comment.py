@@ -121,3 +121,34 @@ def post_escalation_node(state: AgentState) -> AgentState:
     except Exception as e:
         logger.error(f"Failed to post escalation to {ticket_id}: {e}", exc_info=True)
         return {**state, "resolution": f"error_posting_escalation: {e}"}
+
+
+def post_resolution_node(state: AgentState) -> AgentState:
+    """Post a closing comment when the user confirms the issue is resolved."""
+    ticket_id = state.get("ticket_id", "")
+    if not ticket_id:
+        logger.warning("No ticket_id in state, cannot post resolution comment")
+        return state
+
+    message = settings.resolution_message_template
+
+    try:
+        logger.info(f"Posting resolution comment to {ticket_id}")
+        result = add_comment(ticket_id, message)
+
+        if not result:
+            logger.warning(f"MCP returned empty response for resolution on {ticket_id}")
+            return {**state, "resolution": "resolved_posted_empty_mcp"}
+
+        logger.info(f"Successfully posted resolution comment to {ticket_id}")
+        updated: dict = {**state, "resolution": "resolved_posted"}
+        target = (settings.status_resolved or "").strip()
+        if target:
+            updated["transition_to_status"] = target
+        return updated
+    except MCPError as e:
+        logger.error(f"MCP error posting resolution to {ticket_id}: {e}")
+        return {**state, "resolution": f"error_posting_resolution: {e}"}
+    except Exception as e:
+        logger.error(f"Failed to post resolution to {ticket_id}: {e}", exc_info=True)
+        return {**state, "resolution": f"error_posting_resolution: {e}"}

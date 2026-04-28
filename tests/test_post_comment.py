@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import patch
 from app.services.jira_mcp import MCPError
-from app.nodes.post_comment import post_comment_node, post_escalation_node
+from app.nodes.post_comment import post_comment_node, post_escalation_node, post_resolution_node
 
 
 @pytest.fixture
@@ -196,3 +196,53 @@ class TestPostEscalationTransition:
         result = post_escalation_node(state)
         assert "transition_to_status" not in result
         assert result["reassign_to"] == "support_user"
+
+
+class TestPostResolutionNode:
+    @patch("app.nodes.post_comment.add_comment")
+    @patch("app.nodes.post_comment.settings")
+    def test_successful_resolution(self, mock_settings, mock_add):
+        mock_settings.resolution_message_template = "Рад помочь!"
+        mock_settings.status_resolved = "Done"
+        mock_add.return_value = "ok"
+        state = {"ticket_id": "T-50", "resolution": None}
+        result = post_resolution_node(state)
+        assert result["resolution"] == "resolved_posted"
+        assert result["transition_to_status"] == "Done"
+        mock_add.assert_called_once_with("T-50", "Рад помочь!")
+
+    @patch("app.nodes.post_comment.add_comment")
+    @patch("app.nodes.post_comment.settings")
+    def test_resolution_without_status(self, mock_settings, mock_add):
+        mock_settings.resolution_message_template = "Рад помочь!"
+        mock_settings.status_resolved = ""
+        mock_add.return_value = "ok"
+        state = {"ticket_id": "T-51", "resolution": None}
+        result = post_resolution_node(state)
+        assert result["resolution"] == "resolved_posted"
+        assert "transition_to_status" not in result
+
+    def test_no_ticket_id(self):
+        state = {"ticket_id": "", "resolution": None}
+        result = post_resolution_node(state)
+        assert result["resolution"] is None
+
+    @patch("app.nodes.post_comment.add_comment")
+    @patch("app.nodes.post_comment.settings")
+    def test_mcp_error(self, mock_settings, mock_add):
+        mock_settings.resolution_message_template = "Рад помочь!"
+        mock_settings.status_resolved = "Done"
+        mock_add.side_effect = MCPError("Jira API 500")
+        state = {"ticket_id": "T-52", "resolution": None}
+        result = post_resolution_node(state)
+        assert "error_posting_resolution" in result["resolution"]
+
+    @patch("app.nodes.post_comment.add_comment")
+    @patch("app.nodes.post_comment.settings")
+    def test_empty_mcp_response(self, mock_settings, mock_add):
+        mock_settings.resolution_message_template = "Рад помочь!"
+        mock_settings.status_resolved = "Done"
+        mock_add.return_value = ""
+        state = {"ticket_id": "T-53", "resolution": None}
+        result = post_resolution_node(state)
+        assert result["resolution"] == "resolved_posted_empty_mcp"
