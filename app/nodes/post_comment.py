@@ -47,6 +47,7 @@ def post_comment_node(state: AgentState) -> AgentState:
         # is not already in a workflow-advanced state.
         current_status_lc = (state.get("issue_status") or "").strip().lower()
         target = (settings.status_in_progress or "").strip()
+        logger.info(f"[post_comment] status_in_progress={target!r}")
         if (
             state.get("is_first_message")
             and target
@@ -109,6 +110,7 @@ def post_escalation_node(state: AgentState) -> AgentState:
         logger.info(f"Successfully posted escalation comment to {ticket_id}")
         updated: dict = {**state, "resolution": "escalation_posted"}
         target = (settings.status_escalated or "").strip()
+        logger.info(f"[escalation] status_escalated={target!r} (len={len(target)})")
         if target:
             updated["transition_to_status"] = target
         new_assignee = (settings.escalation_assignee or "").strip()
@@ -143,6 +145,7 @@ def post_resolution_node(state: AgentState) -> AgentState:
         logger.info(f"Successfully posted resolution comment to {ticket_id}")
         updated: dict = {**state, "resolution": "resolved_posted"}
         target = (settings.status_resolved or "").strip()
+        logger.info(f"[resolution] status_resolved={target!r}")
         if target:
             updated["transition_to_status"] = target
         return updated

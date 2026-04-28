@@ -165,6 +165,15 @@ def _validate_event(payload: dict, event_type: str) -> bool:
 
 def main():
     logger.info(f"Starting agent | stream={settings.redis_stream}")
+    logger.info(
+        "[CONFIG] status_in_progress=%r  status_resolved=%r  status_escalated=%r  "
+        "escalation_assignee=%r  bot_username=%r",
+        settings.status_in_progress,
+        settings.status_resolved,
+        settings.status_escalated,
+        settings.escalation_assignee,
+        settings.bot_username,
+    )
 
     client = get_redis_client()
     ensure_group(client)

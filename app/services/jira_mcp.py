@@ -257,8 +257,15 @@ def get_transitions(issue_key: str) -> list[dict]:
     try:
         raw = asyncio.run(_call("jira_get_transitions", {"issue_key": issue_key}))
         transitions = _parse_transitions(raw)
-        logger.info(f"[Jira] Available transitions for {issue_key}: "
-                     f"{[(t.get('id'), t.get('name')) for t in transitions]}")
+        summary = [
+            {
+                "id": t.get("id"),
+                "name": t.get("name"),
+                "to": t.get("to"),
+            }
+            for t in transitions
+        ]
+        logger.info(f"[Jira] Available transitions for {issue_key}: {summary}")
         return transitions
     except MCPError as e:
         logger.error(f"[Jira] get_transitions failed for {issue_key}: {e}")
