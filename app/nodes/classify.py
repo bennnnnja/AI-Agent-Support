@@ -55,8 +55,9 @@ def classify_request(state: AgentState) -> AgentState:
 
     # Sprint 3: только лог. Эскалация по приоритету решается в ingest_event
     # через payload-флаги force_escalation/super_priority/needs_human (см. app/main.py).
+    # Набор уровней соответствует стандартной схеме Jira (Highest/High/Medium/Low/Lowest).
     priority_raw = (state.get("issue_priority") or "").strip().lower()
-    if priority_raw in {"critical", "blocker", "highest"}:
+    if priority_raw in {"highest", "high"}:
         logger.info(
             "[classify] High priority detected: %s (ticket=%s)",
             priority_raw, state.get("ticket_id"),

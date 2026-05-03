@@ -176,10 +176,10 @@ class TestConversationFollowup:
 class TestPriorityLogging:
     """Sprint 3: высокий issue_priority должен только логироваться, не менять категорию."""
 
-    def test_high_priority_logs_but_does_not_change_category(self, caplog):
+    def test_highest_priority_logs_but_does_not_change_category(self, caplog):
         state = {
             "user_message": "принтер не печатает",  # rule-based → tech_support
-            "issue_priority": "Critical",
+            "issue_priority": "Highest",
             "category": None,
             "conversation_history": [],
             "ticket_id": "SUP-1",
@@ -188,7 +188,22 @@ class TestPriorityLogging:
             result = classify_request(state)
         assert result["category"] == "tech_support"
         assert any(
-            "High priority detected: critical" in rec.getMessage()
+            "High priority detected: highest" in rec.getMessage()
+            for rec in caplog.records
+        )
+
+    def test_high_priority_also_logs(self, caplog):
+        state = {
+            "user_message": "принтер не печатает",
+            "issue_priority": "High",
+            "category": None,
+            "conversation_history": [],
+            "ticket_id": "SUP-1b",
+        }
+        with caplog.at_level("INFO", logger="app.nodes.classify"):
+            classify_request(state)
+        assert any(
+            "High priority detected: high" in rec.getMessage()
             for rec in caplog.records
         )
 
