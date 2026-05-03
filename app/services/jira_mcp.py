@@ -45,6 +45,11 @@ class MCPError(Exception):
 
 
 async def _call(tool: str, args: dict) -> str:
+    # TODO (Sprint 6+): batch tool calls в одной stdio-сессии.
+    # Сейчас каждый _call поднимает отдельный uvx-процесс mcp-atlassian
+    # (~200-500ms overhead). Для рефакторинга нужно прокидывать ClientSession
+    # сквозь высокоуровневые функции (get_issue, add_comment, transition_issue),
+    # что выходит за scope MVP.
     async with stdio_client(_server_params()) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

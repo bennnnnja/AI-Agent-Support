@@ -171,3 +171,52 @@ class TestConversationFollowup:
                 {"role": "assistant", "body": "Ответ"},
             ],
         })
+
+
+class TestPriorityLogging:
+    """Sprint 3: высокий issue_priority должен только логироваться, не менять категорию."""
+
+    def test_high_priority_logs_but_does_not_change_category(self, caplog):
+        state = {
+            "user_message": "принтер не печатает",  # rule-based → tech_support
+            "issue_priority": "Critical",
+            "category": None,
+            "conversation_history": [],
+            "ticket_id": "SUP-1",
+        }
+        with caplog.at_level("INFO", logger="app.nodes.classify"):
+            result = classify_request(state)
+        assert result["category"] == "tech_support"
+        assert any(
+            "High priority detected: critical" in rec.getMessage()
+            for rec in caplog.records
+        )
+
+    def test_normal_priority_does_not_log(self, caplog):
+        state = {
+            "user_message": "принтер не печатает",
+            "issue_priority": "Medium",
+            "category": None,
+            "conversation_history": [],
+            "ticket_id": "SUP-2",
+        }
+        with caplog.at_level("INFO", logger="app.nodes.classify"):
+            classify_request(state)
+        assert not any(
+            "High priority detected" in rec.getMessage()
+            for rec in caplog.records
+        )
+
+    def test_missing_priority_does_not_log(self, caplog):
+        state = {
+            "user_message": "принтер не печатает",
+            "category": None,
+            "conversation_history": [],
+            "ticket_id": "SUP-3",
+        }
+        with caplog.at_level("INFO", logger="app.nodes.classify"):
+            classify_request(state)
+        assert not any(
+            "High priority detected" in rec.getMessage()
+            for rec in caplog.records
+        )

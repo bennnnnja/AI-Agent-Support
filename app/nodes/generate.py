@@ -1,4 +1,5 @@
 import logging
+from app.config import settings
 from app.state import AgentState
 from app.services.llm import get_llm
 
@@ -191,13 +192,32 @@ def generate_response(state: AgentState) -> AgentState:
 
     conversation_history = state.get("conversation_history", [])
 
-    # 1) Если есть результаты из RAG — используем их напрямую без вызова LLM
+    # 1) Если есть результаты из RAG — используем их (опционально через LLM-синтез)
     rag_results = state.get("rag_results", [])
     logger.debug(f"[GENERATE] RAG results count: {len(rag_results)}")
     if rag_results:
         for i, result in enumerate(rag_results):
             logger.debug(f"[GENERATE] RAG result {i}: {result[:200]}")
         rag_text = _format_rag_results(rag_results)
+
+        if getattr(settings, "rag_use_llm_synthesis", False):
+            try:
+                prompt = GENERATE_PROMPT.format(
+                    issue_status=state.get("issue_status", "Unknown"),
+                    issue_priority=state.get("issue_priority", "Unknown"),
+                    issue_assignee=state.get("issue_assignee", "Unassigned"),
+                    rag_results=rag_text,
+                    conversation_history=_format_conversation_history(conversation_history),
+                    user_message=state.get("user_message", ""),
+                )
+                response = get_llm().invoke(prompt)
+                response_text = response.content.strip() if hasattr(response, "content") else str(response).strip()
+                response_text = _apply_similarity_guard(response_text, conversation_history)
+                logger.info("[GENERATE] Using LLM-synthesized response over %d RAG result(s)", len(rag_results))
+                return {**state, "response": response_text}
+            except Exception as e:
+                logger.warning("[GENERATE] LLM synthesis failed, falling back to raw RAG: %s", e)
+
         rag_text = _apply_similarity_guard(rag_text, conversation_history)
         logger.info("[GENERATE] Using RAG-only response with %d result(s)", len(rag_results))
         return {**state, "response": rag_text}

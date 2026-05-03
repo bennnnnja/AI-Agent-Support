@@ -53,6 +53,15 @@ def classify_request(state: AgentState) -> AgentState:
         logger.warning("No user_message for classification")
         return {**state, "category": "unclear"}
 
+    # Sprint 3: только лог. Эскалация по приоритету решается в ingest_event
+    # через payload-флаги force_escalation/super_priority/needs_human (см. app/main.py).
+    priority_raw = (state.get("issue_priority") or "").strip().lower()
+    if priority_raw in {"critical", "blocker", "highest"}:
+        logger.info(
+            "[classify] High priority detected: %s (ticket=%s)",
+            priority_raw, state.get("ticket_id"),
+        )
+
     # Rule-based shortcut для очевидных тех-кейсов
     rule_category = _rule_based_classify(user_message)
     if rule_category:

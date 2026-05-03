@@ -1,0 +1,20 @@
+services:
+  agent:
+    build: .
+    image: ai-agent-support:local
+    env_file: .env
+    ports:
+      - "${HEALTH_PORT:-8080}:8080"
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 15s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health',timeout=3).status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 
     # RAG API (Knowledge Base) — login via POST /login (grant_type=password), then Bearer token for /query
     rag_api_url: str = "http://localhost:9621"
+    rag_api_prefix: str = ""  # path prefix, e.g. "/api" for LightRAG behind a reverse proxy
     rag_username: str = ""
     rag_api_key: str = ""
 
@@ -25,6 +26,9 @@ class Settings(BaseSettings):
     rag_response_type: str = "Multiple Paragraphs"
     rag_max_query_chars: int = 1500
     rag_timeout_budget: int = 10
+    # Если True — поверх найденных RAG-результатов запускается LLM-синтез по GENERATE_PROMPT.
+    # False (дефолт) — возвращаем сырой RAG-вывод (текущее поведение, безопасный rollout).
+    rag_use_llm_synthesis: bool = False
     
     # Jira MCP
     jira_url: str = "http://localhost:8080"

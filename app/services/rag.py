@@ -9,16 +9,26 @@ logger = logging.getLogger(__name__)
 _rag_token: str | None = None
 
 
+def _api_prefix() -> str:
+    """Normalize rag_api_prefix: empty → "", "/api" / "api/" → "/api"."""
+    raw = getattr(settings, "rag_api_prefix", "") or ""
+    prefix = str(raw).strip().rstrip("/")
+    if prefix and not prefix.startswith("/"):
+        prefix = "/" + prefix
+    return prefix
+
+
 def _get_rag_token() -> str | None:
     """Login via POST /login (application/x-www-form-urlencoded), return Bearer token."""
     global _rag_token
     if not settings.rag_api_key:
         return None
     base = settings.rag_api_url.rstrip("/")
+    prefix = _api_prefix()
     try:
         with httpx.Client(timeout=15.0) as client:
             response = client.post(
-                f"{base}/login",
+                f"{base}{prefix}/login",
                 data={
                     "grant_type": "password",
                     "username": settings.rag_username or "user",
@@ -92,15 +102,16 @@ def _extract_results(data: dict) -> list[str]:
 def _query_once(base: str, headers: dict, query: str, mode: str, timeout: float = 60.0) -> list[str]:
     global _rag_token
     payload = _build_payload(query, mode)
+    query_url = f"{base}{_api_prefix()}/query"
 
     with httpx.Client(timeout=timeout) as client:
-        response = client.post(f"{base}/query", json=payload, headers=headers)
+        response = client.post(query_url, json=payload, headers=headers)
         if response.status_code == 401:
             _rag_token = None
             token = _get_rag_token()
             if token:
                 headers = {**headers, "Authorization": f"Bearer {token}"}
-                response = client.post(f"{base}/query", json=payload, headers=headers)
+                response = client.post(query_url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
 

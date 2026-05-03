@@ -1,11 +1,13 @@
 import hashlib
 import json
 import logging
+import signal
 import time
 
 from app.config import settings
 from app.services.redis_consumer import get_redis_client, ensure_group, read_events, ack_event
 from app.graph import build_graph
+from app.health import start_health_server
 
 # Configure logging
 logging.basicConfig(
@@ -21,6 +23,39 @@ _recent_bot_bodies: dict[str, set[str]] = {}
 
 _escalated_tickets: set[str] = set()
 _resolved_tickets: set[str] = set()
+
+# Graceful shutdown flag — set by SIGINT/SIGTERM handlers, checked by main loop.
+_shutdown_requested: bool = False
+
+
+def _request_shutdown(signum, _frame):
+    """Signal handler: ask the main loop to exit cleanly after current iteration."""
+    global _shutdown_requested
+    logger.info("[SHUTDOWN] Received signal %s — finishing current iteration...", signum)
+    _shutdown_requested = True
+
+
+_REQUIRED_MCP_TOOLS = {
+    "jira_get_issue",
+    "jira_add_comment",
+    "jira_get_transitions",
+    "jira_transition_issue",
+    "jira_update_issue",
+}
+
+
+def _check_mcp_tools_available() -> None:
+    """Best-effort startup check that critical Jira MCP tools are available."""
+    try:
+        from app.services.jira_mcp import list_tools
+        tools = set(list_tools())
+        missing = _REQUIRED_MCP_TOOLS - tools
+        if missing:
+            logger.warning("[MCP] Missing critical Jira tools: %s", sorted(missing))
+        else:
+            logger.info("[MCP] All required Jira tools available (%d total)", len(tools))
+    except Exception as e:
+        logger.warning("[MCP] Failed to list tools at startup: %s", e)
 
 
 def _record_posted_comment(ticket_id: str, body: str) -> None:
@@ -179,11 +214,20 @@ def main():
     ensure_group(client)
     graph = build_graph()
 
+    # Hardening: liveness probe + signal-based graceful shutdown + MCP availability check.
+    start_health_server()
+    signal.signal(signal.SIGINT, _request_shutdown)
+    signal.signal(signal.SIGTERM, _request_shutdown)
+    _check_mcp_tools_available()
+
     logger.info("Listening for events...")
 
-    while True:
+    while not _shutdown_requested:
         events = read_events(client)
         for message_id, raw_event in events:
+            if _shutdown_requested:
+                logger.info("[SHUTDOWN] Stopping mid-batch; %s left unacked for next consumer", message_id)
+                break
             logger.debug(f"Raw event from Redis: {raw_event}")
 
             # Parse payload once
@@ -288,6 +332,8 @@ def main():
             except Exception as e:
                 logger.error(f"Graph execution failed for {issue_key}: {e}", exc_info=True)
                 # Do NOT ack — event stays in pending list for reprocessing
+
+    logger.info("[SHUTDOWN] Loop exited cleanly")
 
 
 if __name__ == "__main__":

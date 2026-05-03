@@ -140,3 +140,54 @@ class TestGenerateResponse:
         base_state["category"] = "off_topic"
         generate_response(base_state)
         mock_get_llm.assert_not_called()
+
+
+class TestRagSynthesis:
+    """Опциональный LLM-синтез поверх найденных RAG-результатов."""
+
+    @patch("app.nodes.generate.settings")
+    @patch("app.nodes.generate.get_llm")
+    def test_rag_synthesis_uses_llm_when_flag_on(
+        self, mock_get_llm, mock_settings, base_state, mock_llm_response
+    ):
+        mock_settings.rag_use_llm_synthesis = True
+        mock_get_llm.return_value.invoke.return_value = mock_llm_response("Синтезированный ответ.")
+        base_state["rag_results"] = ["raw doc 1", "raw doc 2"]
+        base_state["issue_status"] = "Open"
+        base_state["issue_priority"] = "High"
+
+        result = generate_response(base_state)
+
+        mock_get_llm.return_value.invoke.assert_called_once()
+        prompt = mock_get_llm.return_value.invoke.call_args[0][0]
+        # GENERATE_PROMPT включает блок ДОКУМЕНТАЦИЯ с raw rag-выводом
+        assert "raw doc 1" in prompt
+        assert "raw doc 2" in prompt
+        assert "Open" in prompt
+        assert result["response"] == "Синтезированный ответ."
+
+    @patch("app.nodes.generate.settings")
+    @patch("app.nodes.generate.get_llm")
+    def test_rag_synthesis_fallback_on_llm_error(
+        self, mock_get_llm, mock_settings, base_state
+    ):
+        """Если LLM падает — возвращаем сырой RAG (graceful fallback)."""
+        mock_settings.rag_use_llm_synthesis = True
+        mock_get_llm.return_value.invoke.side_effect = Exception("Ollama timeout")
+        base_state["rag_results"] = ["Инструкция: перезагрузите принтер"]
+
+        result = generate_response(base_state)
+        assert "Инструкция: перезагрузите принтер" in result["response"]
+
+    @patch("app.nodes.generate.settings")
+    @patch("app.nodes.generate.get_llm")
+    def test_rag_synthesis_skipped_when_flag_off(
+        self, mock_get_llm, mock_settings, base_state
+    ):
+        """С флагом False (default) сохраняется текущее поведение — LLM не вызывается."""
+        mock_settings.rag_use_llm_synthesis = False
+        base_state["rag_results"] = ["Сырой RAG результат"]
+
+        result = generate_response(base_state)
+        mock_get_llm.assert_not_called()
+        assert "Сырой RAG результат" in result["response"]

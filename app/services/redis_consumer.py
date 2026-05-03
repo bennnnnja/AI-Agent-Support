@@ -47,3 +47,14 @@ def read_events(client: redis.Redis) -> list[tuple[str, dict]]:
 def ack_event(client: redis.Redis, message_id: str):
     """Acknowledge event after successful processing."""
     client.xack(settings.redis_stream, settings.redis_group, message_id)
+
+
+# NOTE: pending reclaim (XAUTOCLAIM / XPENDING + XCLAIM) намеренно не реализован
+# на этом этапе MVP. Текущая политика: события без ack автоматически становятся
+# доступны другому потребителю по pel-min-idle-time (Redis default — 30 минут).
+# Безопасный reclaim требует idempotency-ключа на уровне graph.invoke,
+# которого пока нет: _escalated_tickets / _resolved_tickets живут только в
+# памяти процесса и теряются при рестарте. До добавления внешнего
+# idempotency-стора (например, Redis SET с TTL) автоматический reclaim
+# рискует продублировать комментарии в Jira после краша воркера.
+# См. план Sprint 6+.
