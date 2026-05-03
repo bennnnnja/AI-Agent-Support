@@ -129,3 +129,14 @@ class TestGenerateResponse:
         result = generate_response(base_state)
         assert result["ticket_id"] == "TEST-1"
         assert result["user_message"] == "Принтер не печатает"
+
+    def test_off_topic_returns_canned_response(self, base_state):
+        base_state["category"] = "off_topic"
+        result = generate_response(base_state)
+        assert "не относится к технической поддержке" in result["response"]
+
+    @patch("app.nodes.generate.get_llm")
+    def test_off_topic_skips_llm(self, mock_get_llm, base_state):
+        base_state["category"] = "off_topic"
+        generate_response(base_state)
+        mock_get_llm.assert_not_called()

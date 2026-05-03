@@ -19,6 +19,9 @@ _ticket_cooldowns: dict[str, float] = {}
 
 _recent_bot_bodies: dict[str, set[str]] = {}
 
+_escalated_tickets: set[str] = set()
+_resolved_tickets: set[str] = set()
+
 
 def _record_posted_comment(ticket_id: str, body: str) -> None:
     if not body:
@@ -90,6 +93,13 @@ def _validate_event(payload: dict, event_type: str) -> bool:
         logger.warning("Event missing event_type, skipping")
         return False
 
+    # Block all events for tickets already in an escalated/in-progress workflow state.
+    # Support is working the ticket — the agent must step away entirely.
+    payload_status = (payload.get("status") or "").strip().lower()
+    if payload_status and payload_status in settings.escalation_status_set:
+        logger.info(f"[FILTER] Skipping event for escalated ticket {issue_key} (status={payload_status})")
+        return False
+
     user_like_roles = {"user", "admin", "administrator", "telegram", "customer"}
     user_like_sources = {"telegram", "web", "portal", "customer"}
 
@@ -155,6 +165,15 @@ def _validate_event(payload: dict, event_type: str) -> bool:
 
 def main():
     logger.info(f"Starting agent | stream={settings.redis_stream}")
+    logger.info(
+        "[CONFIG] status_in_progress=%r  status_resolved=%r  status_escalated=%r  "
+        "escalation_assignee=%r  bot_username=%r",
+        settings.status_in_progress,
+        settings.status_resolved,
+        settings.status_escalated,
+        settings.escalation_assignee,
+        settings.bot_username,
+    )
 
     client = get_redis_client()
     ensure_group(client)
@@ -172,6 +191,13 @@ def main():
             event_type = raw_event.get("event_type", "")
             issue_key = payload.get("issue_key") or raw_event.get("issue_key", "")
             payload["issue_key"] = issue_key  # ensure issue_key is in payload
+
+            # Terminal state: ticket already escalated or resolved — agent must not respond
+            if issue_key in _escalated_tickets or issue_key in _resolved_tickets:
+                label = "escalated" if issue_key in _escalated_tickets else "resolved"
+                logger.info(f"[TERMINAL] Skipping {event_type} for {issue_key} (already {label})")
+                ack_event(client, message_id)
+                continue
 
             # Per-ticket cooldown: prevent re-processing the same ticket too soon
             now = time.time()
@@ -249,7 +275,12 @@ def main():
                 _ticket_cooldowns[issue_key] = time.time()
 
                 resolution = result.get("resolution") or ""
-                if resolution in ("comment_posted", "escalation_posted"):
+                if resolution == "escalation_posted":
+                    _escalated_tickets.add(issue_key)
+                elif resolution == "resolved_posted":
+                    _resolved_tickets.add(issue_key)
+
+                if resolution in ("comment_posted", "escalation_posted", "resolved_posted"):
                     response_body = result.get("response") or ""
                     _record_posted_comment(issue_key, response_body)
 

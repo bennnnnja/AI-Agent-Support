@@ -45,6 +45,94 @@ def _extract_latest_user_message(conversation_history: list[dict]) -> str:
     return ""
 
 
+_POSITIVE_RESOLUTION_PHRASES = (
+    "помогло",
+    "спасибо, помогло",
+    "спасибо помогло",
+    "решило проблему",
+    "всё заработало",
+    "все заработало",
+    "заработало",
+    "проблема решена",
+    "проблема устранена",
+    "всё работает",
+    "все работает",
+    "можно закрыть",
+    "заявку можно закрыть",
+    "вопрос решён",
+    "вопрос решен",
+    "вопрос снят",
+)
+
+
+def _positive_resolution_detected(text: str) -> bool:
+    if not text:
+        return False
+    lowered = text.strip().lower()
+    return any(phrase in lowered for phrase in _POSITIVE_RESOLUTION_PHRASES)
+
+
+def _already_escalated_in_history(conversation_history: list[dict]) -> bool:
+    esc_prefix = settings.escalation_message_template.split("\n")[0].strip()[:40]
+    if not esc_prefix:
+        return False
+    for msg in conversation_history or []:
+        if (msg.get("role") or "").strip().lower() != "assistant":
+            continue
+        body = (msg.get("body") or "").strip()
+        if body.startswith(esc_prefix):
+            return True
+    return False
+
+
+def _already_resolved_in_history(conversation_history: list[dict]) -> bool:
+    res_prefix = settings.resolution_message_template.strip()[:40]
+    if not res_prefix:
+        return False
+    for msg in conversation_history or []:
+        if (msg.get("role") or "").strip().lower() != "assistant":
+            continue
+        body = (msg.get("body") or "").strip()
+        if body.startswith(res_prefix):
+            return True
+    return False
+
+
+_ESCALATION_REQUEST_PHRASES = (
+    "переведи на специалист",
+    "переведите на специалист",
+    "перевести на специалист",
+    "перевод на специалист",
+    "передайте специалист",
+    "передай специалист",
+    "соедини со специалист",
+    "соедините со специалист",
+    "позови специалист",
+    "позовите специалист",
+    "позови человек",
+    "позовите человек",
+    "нужен специалист",
+    "нужен живой",
+    "нужен человек",
+    "хочу оператор",
+    "хочу к специалист",
+    "свяжите со специалист",
+    "свяжите с оператор",
+    "переключи на оператор",
+    "переключи на специалист",
+    "пригласите специалист",
+    "живой человек",
+)
+
+
+def _explicit_escalation_requested(text: str) -> bool:
+    """Detect direct user requests to escalate to a human specialist."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(phrase in lowered for phrase in _ESCALATION_REQUEST_PHRASES)
+
+
 def _is_escalated(
     issue_status: str,
     issue_assignee,
@@ -129,6 +217,25 @@ def ingest_event(state: AgentState) -> AgentState:
 
         logger.info(f"[ingest] Built conversation history with {len(conversation_history)} entries")
 
+        # Terminal state guards — if the bot already posted an escalation or
+        # resolution message, skip all further processing for this ticket.
+        if _already_escalated_in_history(conversation_history):
+            logger.info(f"[ingest] Escalation already posted for {ticket_id}, skipping")
+            return {
+                **state,
+                "conversation_history": conversation_history,
+                "skip": True,
+                "resolution": "skipped_already_escalated",
+            }
+        if _already_resolved_in_history(conversation_history):
+            logger.info(f"[ingest] Resolution already posted for {ticket_id}, skipping")
+            return {
+                **state,
+                "conversation_history": conversation_history,
+                "skip": True,
+                "resolution": "skipped_already_resolved",
+            }
+
         # Guard against processing an echo of our own last comment.
         # The webhook gateway may strip author metadata, so _validate_event
         # lets the event through — here we have full Jira context and can tell.
@@ -188,6 +295,31 @@ def ingest_event(state: AgentState) -> AgentState:
         if len((updated_state.get("user_message") or "")) < 10 and issue.get("description"):
             logger.info(f"[ingest] Enriching message with issue description")
             updated_state["user_message"] = f"{issue.get('summary', '')}\n\n{issue.get('description', '')}"
+
+        # Explicit user request to escalate ("переведи на специалиста" etc.) — honour immediately.
+        if not updated_state.get("escalated"):
+            final_user_msg = updated_state.get("user_message", "") or ""
+            latest_user_msg = _extract_latest_user_message(conversation_history)
+            if (
+                _explicit_escalation_requested(final_user_msg)
+                or _explicit_escalation_requested(latest_user_msg)
+            ):
+                updated_state["escalated"] = True
+                updated_state["escalation_reason"] = "user_requested_human"
+                updated_state["resolution"] = "skipped_escalated"
+                logger.info(f"[ESCALATED] {ticket_id} reason=user_requested_human")
+
+        # Positive resolution detection — user confirms the issue is solved.
+        # Only triggers after at least one bot reply (attempt_count > 0).
+        if not updated_state.get("escalated") and attempt_count > 0:
+            final_user_msg = updated_state.get("user_message", "") or ""
+            latest_user_msg = _extract_latest_user_message(conversation_history)
+            if (
+                _positive_resolution_detected(final_user_msg)
+                or _positive_resolution_detected(latest_user_msg)
+            ):
+                updated_state["resolved"] = True
+                logger.info(f"[RESOLVED] {ticket_id} reason=positive_user_feedback")
 
         return updated_state
 

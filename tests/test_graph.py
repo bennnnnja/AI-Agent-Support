@@ -13,5 +13,7 @@ class TestBuildGraph:
         # CompiledGraph has .nodes dict
         node_names = set(graph.nodes.keys())
         expected = {"ingest_event", "classify_request", "search_knowledge",
-                    "generate_response", "post_comment"}
+                    "generate_response", "post_comment",
+                    "post_escalation_comment", "post_resolution_comment",
+                    "transition_status"}
         assert expected.issubset(node_names)

@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     bot_comment_marker: str = ""
 
     # Escalation / roles
-    escalation_statuses: str = "In Progress,In Review,Escalated,Waiting for support"
+    escalation_statuses: str = "Escalated,Waiting for support"
     support_usernames: str = ""  # CSV list of support usernames (optional)
     max_self_help_attempts: int = 3
     escalation_message_template: str = (
@@ -46,6 +46,17 @@ class Settings(BaseSettings):
         "Номер обращения: {ticket_id}\n\n"
         "Специалист свяжется с вами в ближайшее время."
     )
+
+    resolution_message_template: str = (
+        "Рад помочь! Если будут ещё вопросы — обращайтесь."
+    )
+
+    # Jira workflow — status transitions (leave empty to disable a given transition)
+    status_in_progress: str = ""   # e.g. "В работе" / "In Progress"
+    status_resolved: str = ""      # e.g. "Готово" / "Done"
+    status_escalated: str = ""     # e.g. "Эскалировано" / "Escalated"
+    # Username to reassign the ticket to when escalating (empty = keep current assignee)
+    escalation_assignee: str = ""
 
     @property
     def escalation_status_set(self) -> set[str]:

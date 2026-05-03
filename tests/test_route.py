@@ -8,7 +8,7 @@ class TestRouteByCategory:
         assert route_by_category({"category": "tech_support"}) == "search_knowledge"
 
     def test_off_topic(self):
-        assert route_by_category({"category": "off_topic"}) == "end"
+        assert route_by_category({"category": "off_topic"}) == "generate_response"
 
     def test_unclear_goes_to_search(self):
         assert route_by_category({"category": "unclear"}) == "search_knowledge"
@@ -42,3 +42,15 @@ class TestRouteAfterIngest:
 
     def test_skip_true_no_escalation(self):
         assert route_after_ingest({"skip": True}) == "skip"
+
+    def test_resolved_true_goes_to_resolve(self):
+        assert route_after_ingest({"resolved": True}) == "resolve"
+
+    def test_resolved_false_goes_to_classify(self):
+        assert route_after_ingest({"resolved": False}) == "classify"
+
+    def test_skip_takes_precedence_over_resolved(self):
+        assert route_after_ingest({"skip": True, "resolved": True}) == "skip"
+
+    def test_resolved_takes_precedence_over_escalated(self):
+        assert route_after_ingest({"resolved": True, "escalated": True}) == "resolve"

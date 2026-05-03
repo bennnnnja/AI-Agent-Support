@@ -64,9 +64,30 @@ async def _list_tools() -> list[str]:
             return [t.name for t in tools.tools]
 
 
+async def _list_tools_detailed():
+    """List available tools from MCP Atlassian server with input schemas."""
+    async with stdio_client(_server_params()) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            result = []
+            for t in tools.tools:
+                result.append({
+                    "name": t.name,
+                    "description": getattr(t, "description", "")[:120],
+                    "input_schema": getattr(t, "inputSchema", {}),
+                })
+            return result
+
+
 def list_tools() -> list[str]:
     """List available MCP tools (useful for debugging tool name mismatches)."""
     return asyncio.run(_list_tools())
+
+
+def list_tools_detailed() -> list[dict]:
+    """List available MCP tools with full parameter schemas (for debugging)."""
+    return asyncio.run(_list_tools_detailed())
 
 
 def _extract_author(value) -> str:
@@ -200,3 +221,97 @@ def add_comment(issue_key: str, comment: str) -> str:
     else:
         logger.warning(f"[Jira] add_comment returned empty response for {issue_key}")
     return result
+
+
+def _parse_transitions(raw: str) -> list[dict]:
+    """Parse raw MCP response into a list of transition dicts."""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return data.get("transitions", [])
+    except (json.JSONDecodeError, AttributeError):
+        pass
+    return []
+
+
+def _find_transition_id(transitions: list[dict], target_name: str) -> str:
+    """Find transition ID by target status name (case-insensitive)."""
+    target_lc = target_name.strip().lower()
+    for t in transitions:
+        name = (t.get("name") or "").strip().lower()
+        to_name = ""
+        to_obj = t.get("to")
+        if isinstance(to_obj, dict):
+            to_name = (to_obj.get("name") or "").strip().lower()
+        if name == target_lc or to_name == target_lc:
+            return str(t.get("id", ""))
+    return ""
+
+
+def get_transitions(issue_key: str) -> list[dict]:
+    """Get available workflow transitions for a Jira issue."""
+    try:
+        raw = asyncio.run(_call("jira_get_transitions", {"issue_key": issue_key}))
+        transitions = _parse_transitions(raw)
+        summary = [
+            {
+                "id": t.get("id"),
+                "name": t.get("name"),
+                "to": t.get("to"),
+            }
+            for t in transitions
+        ]
+        logger.info(f"[Jira] Available transitions for {issue_key}: {summary}")
+        return transitions
+    except MCPError as e:
+        logger.error(f"[Jira] get_transitions failed for {issue_key}: {e}")
+        return []
+
+
+def transition_issue(issue_key: str, transition_name: str) -> str:
+    """Transition a Jira issue by looking up the transition ID from the name."""
+    if not transition_name:
+        return ""
+    try:
+        transitions = get_transitions(issue_key)
+        transition_id = _find_transition_id(transitions, transition_name)
+        if not transition_id:
+            available = [(t.get("id"), t.get("name")) for t in transitions]
+            logger.warning(
+                f"[Jira] No transition matching '{transition_name}' for {issue_key}. "
+                f"Available: {available}"
+            )
+            return ""
+        logger.info(f"[Jira] Transitioning {issue_key} via id={transition_id} ('{transition_name}')")
+        result = asyncio.run(_call("jira_transition_issue", {
+            "issue_key": issue_key,
+            "transition_id": transition_id,
+        }))
+        if result:
+            logger.info(f"[Jira] transition_issue response: {result[:200]}")
+        return result
+    except MCPError as e:
+        logger.error(f"[Jira] transition_issue failed for {issue_key} -> {transition_name}: {e}")
+        raise
+
+
+def assign_issue(issue_key: str, assignee: str) -> str:
+    """Assign a Jira issue to a user by username."""
+    if not assignee:
+        return ""
+    try:
+        fields_payload = json.dumps({"assignee": assignee})
+        result = asyncio.run(_call("jira_update_issue", {
+            "issue_key": issue_key,
+            "fields": fields_payload,
+        }))
+        if result:
+            logger.info(f"[Jira] assign_issue response: {result[:200]}")
+        return result
+    except MCPError as e:
+        logger.error(f"[Jira] assign_issue failed for {issue_key} -> {assignee}: {e}")
+        raise

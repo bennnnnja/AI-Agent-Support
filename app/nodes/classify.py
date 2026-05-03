@@ -37,6 +37,15 @@ def _rule_based_classify(message: str) -> str | None:
     return None
 
 
+def _is_conversation_followup(state: AgentState) -> bool:
+    """Return True if the conversation already has bot responses (ongoing tech dialog)."""
+    history = state.get("conversation_history") or []
+    return any(
+        (msg.get("role") or "").strip().lower() == "assistant"
+        for msg in history
+    )
+
+
 def classify_request(state: AgentState) -> AgentState:
     """Classify the request into categories."""
     user_message = state.get("user_message", "")
@@ -49,7 +58,11 @@ def classify_request(state: AgentState) -> AgentState:
     if rule_category:
         logger.info(f"[classify] Rule-based shortcut: {rule_category} (keyword match)")
         return {**state, "category": rule_category}
- 
+
+    # Follow-up in an existing conversation — treat as tech_support continuation
+    if _is_conversation_followup(state):
+        logger.info("[classify] Follow-up in existing conversation → tech_support")
+        return {**state, "category": "tech_support"}
 
     llm = get_llm()
 

@@ -176,8 +176,18 @@ def _format_rag_results(rag_results: list[str]) -> str:
     return "\n---\n".join(rag_results)
 
 
+_OFF_TOPIC_RESPONSE = (
+    "Ваш запрос не относится к технической поддержке. "
+    "Если у вас есть вопрос по оборудованию или ПО, пожалуйста, опишите проблему подробнее."
+)
+
+
 def generate_response(state: AgentState) -> AgentState:
     """Generate response using RAG as primary source and LLM as fallback."""
+
+    if state.get("category") == "off_topic":
+        logger.info("[GENERATE] Off-topic request, returning canned response")
+        return {**state, "response": _OFF_TOPIC_RESPONSE}
 
     conversation_history = state.get("conversation_history", [])
 
