@@ -1,7 +1,18 @@
 """Tests for main._validate_event — event validation and bot comment filtering."""
+import fakeredis
 import pytest
 from unittest.mock import patch
-from app.main import _validate_event, _record_posted_comment, _is_echo_body, _recent_bot_bodies
+from app.main import _validate_event, _record_posted_comment, _is_echo_body
+from app.services import state_store as ss_mod
+from app.services.state_store import StateStore
+
+
+@pytest.fixture(autouse=True)
+def _isolated_state_store():
+    """Replace the module singleton with a fakeredis-backed store per test."""
+    ss_mod.set_state_store(StateStore(fakeredis.FakeRedis(decode_responses=True), cooldown_seconds=5))
+    yield
+    ss_mod.set_state_store(None)
 
 
 class TestValidateEvent:
@@ -241,9 +252,6 @@ class TestIssueUpdatedFiltering:
 
 class TestBodyHashTracking:
     """Test body-hash echo detection."""
-
-    def setup_method(self):
-        _recent_bot_bodies.clear()
 
     def test_record_and_detect_echo(self):
         _record_posted_comment("TEST-1", "Hello, this is a bot response.")

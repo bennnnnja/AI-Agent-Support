@@ -1,11 +1,12 @@
-import hashlib
+import concurrent.futures
 import json
 import logging
+import os
 import signal
-import time
 
 from app.config import settings
 from app.services.redis_consumer import get_redis_client, ensure_group, read_events, ack_event
+from app.services.state_store import get_state_store
 from app.graph import build_graph
 from app.health import start_health_server
 
@@ -15,14 +16,6 @@ logging.basicConfig(
     format="[%(asctime)s] %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-COOLDOWN_SECONDS = 15
-_ticket_cooldowns: dict[str, float] = {}
-
-_recent_bot_bodies: dict[str, set[str]] = {}
-
-_escalated_tickets: set[str] = set()
-_resolved_tickets: set[str] = set()
 
 # Graceful shutdown flag — set by SIGINT/SIGTERM handlers, checked by main loop.
 _shutdown_requested: bool = False
@@ -45,31 +38,50 @@ _REQUIRED_MCP_TOOLS = {
 
 
 def _check_mcp_tools_available() -> None:
-    """Best-effort startup check that critical Jira MCP tools are available."""
+    """Best-effort startup check that critical Jira MCP tools are available.
+
+    Bounded by MCP_STARTUP_TIMEOUT (default 10s) so a hung MCP subprocess
+    cannot stall the entire agent startup.
+    """
+    timeout = float(os.environ.get("MCP_STARTUP_TIMEOUT", "10"))
     try:
         from app.services.jira_mcp import list_tools
-        tools = set(list_tools())
-        missing = _REQUIRED_MCP_TOOLS - tools
-        if missing:
-            logger.warning("[MCP] Missing critical Jira tools: %s", sorted(missing))
-        else:
-            logger.info("[MCP] All required Jira tools available (%d total)", len(tools))
+    except Exception as e:
+        logger.warning("[MCP] Could not import list_tools: %s", e)
+        return
+
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = ex.submit(list_tools)
+    try:
+        tools = set(future.result(timeout=timeout))
+    except concurrent.futures.TimeoutError:
+        logger.warning(
+            "[MCP] Startup tools check timed out after %ss — continuing without verification",
+            timeout,
+        )
+        ex.shutdown(wait=False, cancel_futures=True)
+        return
     except Exception as e:
         logger.warning("[MCP] Failed to list tools at startup: %s", e)
+        ex.shutdown(wait=False, cancel_futures=True)
+        return
+    ex.shutdown(wait=False)
+
+    missing = _REQUIRED_MCP_TOOLS - tools
+    if missing:
+        logger.warning("[MCP] Missing critical Jira tools: %s", sorted(missing))
+    else:
+        logger.info("[MCP] All required Jira tools available (%d total)", len(tools))
 
 
 def _record_posted_comment(ticket_id: str, body: str) -> None:
-    if not body:
-        return
-    h = hashlib.md5(body.strip()[:500].encode()).hexdigest()
-    _recent_bot_bodies.setdefault(ticket_id, set()).add(h)
+    """Compatibility wrapper: forward to state_store."""
+    get_state_store().record_posted_comment(ticket_id, body)
 
 
 def _is_echo_body(ticket_id: str, body: str) -> bool:
-    if not body or ticket_id not in _recent_bot_bodies:
-        return False
-    h = hashlib.md5(body.strip()[:500].encode()).hexdigest()
-    return h in _recent_bot_bodies[ticket_id]
+    """Compatibility wrapper: forward to state_store."""
+    return get_state_store().is_echo_body(ticket_id, body)
 
 
 def _parse_event_payload(event: dict) -> dict:
@@ -213,6 +225,7 @@ def main():
     client = get_redis_client()
     ensure_group(client)
     graph = build_graph()
+    store = get_state_store()
 
     # Hardening: liveness probe + signal-based graceful shutdown + MCP availability check.
     start_health_server()
@@ -237,17 +250,21 @@ def main():
             payload["issue_key"] = issue_key  # ensure issue_key is in payload
 
             # Terminal state: ticket already escalated or resolved — agent must not respond
-            if issue_key in _escalated_tickets or issue_key in _resolved_tickets:
-                label = "escalated" if issue_key in _escalated_tickets else "resolved"
-                logger.info(f"[TERMINAL] Skipping {event_type} for {issue_key} (already {label})")
+            if store.is_escalated(issue_key):
+                logger.info(f"[TERMINAL] Skipping {event_type} for {issue_key} (already escalated)")
+                ack_event(client, message_id)
+                continue
+            if store.is_resolved(issue_key):
+                logger.info(f"[TERMINAL] Skipping {event_type} for {issue_key} (already resolved)")
                 ack_event(client, message_id)
                 continue
 
             # Per-ticket cooldown: prevent re-processing the same ticket too soon
-            now = time.time()
-            last_time = _ticket_cooldowns.get(issue_key, 0)
-            if event_type != "issue_created" and (now - last_time) < COOLDOWN_SECONDS:
-                logger.info(f"[COOLDOWN] Skipping {event_type} for {issue_key} ({now - last_time:.1f}s < {COOLDOWN_SECONDS}s)")
+            if event_type != "issue_created" and store.is_in_cooldown(issue_key):
+                logger.info(
+                    f"[COOLDOWN] Skipping {event_type} for {issue_key} "
+                    f"(<{store.cooldown_seconds}s since last processed)"
+                )
                 ack_event(client, message_id)
                 continue
 
@@ -316,17 +333,17 @@ def main():
                     result.get("resolution"),
                 )
 
-                _ticket_cooldowns[issue_key] = time.time()
+                store.set_cooldown(issue_key)
 
                 resolution = result.get("resolution") or ""
                 if resolution == "escalation_posted":
-                    _escalated_tickets.add(issue_key)
+                    store.mark_escalated(issue_key)
                 elif resolution == "resolved_posted":
-                    _resolved_tickets.add(issue_key)
+                    store.mark_resolved(issue_key)
 
                 if resolution in ("comment_posted", "escalation_posted", "resolved_posted"):
                     response_body = result.get("response") or ""
-                    _record_posted_comment(issue_key, response_body)
+                    store.record_posted_comment(issue_key, response_body)
 
                 ack_event(client, message_id)
             except Exception as e:

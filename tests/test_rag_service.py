@@ -135,6 +135,63 @@ class TestSearchKnowledge:
 
     @patch("app.services.rag.httpx.Client")
     @patch("app.services.rag.settings")
+    def test_response_null_returns_empty(self, mock_settings, mock_client_cls, mock_get_token):
+        """LightRAG may return {"response": null} for queries with no match."""
+        mock_settings.rag_api_url = "http://rag:9621"
+        mock_settings.rag_api_key = "sk-key"
+        mock_settings.rag_response_type = "Multiple Paragraphs"
+        mock_settings.rag_top_k = 10
+        mock_settings.rag_mode_list = ["hybrid"]
+        mock_settings.rag_api_prefix = ""
+        mock_settings.rag_timeout_budget = 10
+        mock_client_cls.return_value.__enter__.return_value.post.return_value = _mock_post_ok({"response": None})
+        results = search_knowledge("test")
+        assert results == []
+
+    @patch("app.services.rag.httpx.Client")
+    @patch("app.services.rag.settings")
+    def test_results_null_returns_empty(self, mock_settings, mock_client_cls, mock_get_token):
+        mock_settings.rag_api_url = "http://rag:9621"
+        mock_settings.rag_api_key = "sk-key"
+        mock_settings.rag_response_type = "Multiple Paragraphs"
+        mock_settings.rag_top_k = 10
+        mock_settings.rag_mode_list = ["hybrid"]
+        mock_settings.rag_api_prefix = ""
+        mock_settings.rag_timeout_budget = 10
+        mock_client_cls.return_value.__enter__.return_value.post.return_value = _mock_post_ok({"results": None})
+        results = search_knowledge("test")
+        assert results == []
+
+    @patch("app.services.rag.httpx.Client")
+    @patch("app.services.rag.settings")
+    def test_results_empty_list_returns_empty(self, mock_settings, mock_client_cls, mock_get_token):
+        mock_settings.rag_api_url = "http://rag:9621"
+        mock_settings.rag_api_key = "sk-key"
+        mock_settings.rag_response_type = "Multiple Paragraphs"
+        mock_settings.rag_top_k = 10
+        mock_settings.rag_mode_list = ["hybrid"]
+        mock_settings.rag_api_prefix = ""
+        mock_settings.rag_timeout_budget = 10
+        mock_client_cls.return_value.__enter__.return_value.post.return_value = _mock_post_ok({"results": []})
+        results = search_knowledge("test")
+        assert results == []
+
+    @patch("app.services.rag.httpx.Client")
+    @patch("app.services.rag.settings")
+    def test_empty_dict_returns_empty(self, mock_settings, mock_client_cls, mock_get_token):
+        mock_settings.rag_api_url = "http://rag:9621"
+        mock_settings.rag_api_key = "sk-key"
+        mock_settings.rag_response_type = "Multiple Paragraphs"
+        mock_settings.rag_top_k = 10
+        mock_settings.rag_mode_list = ["hybrid"]
+        mock_settings.rag_api_prefix = ""
+        mock_settings.rag_timeout_budget = 10
+        mock_client_cls.return_value.__enter__.return_value.post.return_value = _mock_post_ok({})
+        results = search_knowledge("test")
+        assert results == []
+
+    @patch("app.services.rag.httpx.Client")
+    @patch("app.services.rag.settings")
     def test_mode_cascade_uses_second_mode_on_empty(self, mock_settings, mock_client_cls, mock_get_token):
         mock_settings.rag_api_url = "http://rag:9621"
         mock_settings.rag_api_key = "sk-key"

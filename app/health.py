@@ -1,8 +1,9 @@
-"""Minimal HTTP health endpoint for liveness probes (Docker/k8s).
+"""Minimal HTTP health endpoint for liveness/readiness probes (Docker/k8s).
 
 Runs in a daemon thread alongside the main event loop. No external deps
-beyond stdlib. Always returns 200 — the agent is alive as long as the
-Python process is up.
+beyond stdlib + redis. Returns 200 only when Redis is reachable — that
+is the agent's single hard dependency. Loss of Redis means the agent
+cannot consume events, so k8s/Docker should restart the container.
 """
 import json
 import logging
@@ -13,11 +14,28 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 logger = logging.getLogger(__name__)
 
 
+def _check_redis() -> tuple[bool, str]:
+    try:
+        from app.services.redis_consumer import get_redis_client
+        client = get_redis_client()
+        client.ping()
+        return True, "ok"
+    except Exception as e:
+        # Truncate to keep response body small and avoid leaking creds in URL
+        return False, type(e).__name__ + ": " + str(e)[:120]
+
+
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 — required name
         if self.path in ("/health", "/healthz", "/"):
-            body = json.dumps({"status": "ok"}).encode()
-            self.send_response(200)
+            ok, redis_detail = _check_redis()
+            payload = {
+                "status": "ok" if ok else "degraded",
+                "redis": redis_detail,
+            }
+            body = json.dumps(payload).encode()
+            status = 200 if ok else 503
+            self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
