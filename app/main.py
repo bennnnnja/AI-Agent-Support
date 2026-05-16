@@ -84,6 +84,20 @@ def _is_echo_body(ticket_id: str, body: str) -> bool:
     return get_state_store().is_echo_body(ticket_id, body)
 
 
+ENRICHED_STAGE = "prioritized"
+
+
+def _is_enriched_event(raw_event: dict) -> bool:
+    """True only for events enriched by priority-service.
+
+    Same-stream-back topology: gateway writes RAW events (no stage marker)
+    and priority-service writes ENRICHED events back to the same stream with
+    top-level stage="prioritized". Without this gate every ticket is processed
+    twice — once on the RAW copy, once on the ENRICHED copy.
+    """
+    return raw_event.get("stage") == ENRICHED_STAGE
+
+
 def _parse_event_payload(event: dict) -> dict:
     """Parse and validate event payload from Redis."""
     payload = event.get("payload", "{}")
@@ -242,6 +256,18 @@ def main():
                 logger.info("[SHUTDOWN] Stopping mid-batch; %s left unacked for next consumer", message_id)
                 break
             logger.debug(f"Raw event from Redis: {raw_event}")
+
+            # Same-stream-back topology: gateway writes RAW events, priority-service
+            # writes ENRICHED events (stage=prioritized) back to the same stream.
+            # Only enriched events are actionable; ack-and-skip the RAW copies,
+            # otherwise every ticket would be processed twice.
+            if not _is_enriched_event(raw_event):
+                logger.info(
+                    "[STAGE] Skipping non-enriched event %s (stage=%r)",
+                    message_id, raw_event.get("stage", ""),
+                )
+                ack_event(client, message_id)
+                continue
 
             # Parse payload once
             payload = _parse_event_payload(raw_event)
